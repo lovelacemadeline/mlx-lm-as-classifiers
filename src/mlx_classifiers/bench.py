@@ -14,7 +14,8 @@ Writes ``bench_runs/bench-<timestamp>.md`` and ``.json`` with the model id,
 git revision, machine and power state (macOS ``pmset``; recorded, never
 changed). The INT8 column is the runner's ``int8`` flag (story 2.3); run with
 ``--int8`` to load the W8A8 kernels. The header records how many MoE layers run
-the per-expert kernel (story 3.6; ``--no-moe-kernel`` for the stock path).
+the per-expert kernel (story 3.6; ``--no-moe-kernel`` for the stock path) and,
+under ``--int8`` on a MoE, how many run the W4A8 expert kernel (story 2.8).
 
 Delta-tail cells (story 3.4, ``--delta-tail N``): a state of ``L`` tokens whose
 last ``N`` change between consecutive decisions (a fresh filler tail per
@@ -289,6 +290,11 @@ def render_markdown(env: dict[str, Any], rows: Sequence[BenchRow]) -> str:
             if "moe_kernel_layers" in env
             else []
         ),
+        *(
+            [f"- MoE expert INT8 (2.8): {env['int8_expert_layers']} layers"]
+            if env.get("int8_expert_layers")
+            else []
+        ),
         "",
         (
             "| state tok | prompt tok | prefix cached | delta tail | int8 | prefilled tok "
@@ -350,6 +356,7 @@ def main(args: argparse.Namespace) -> int:
     )
     env = environment(args.model)
     env["moe_kernel_layers"] = runner.moe_kernel_layers
+    env["int8_expert_layers"] = runner.int8_expert_layers
     rows = run_bench(
         runner, args.lengths, reps=args.reps, warmup=args.warmup, delta_tails=args.delta_tail
     )

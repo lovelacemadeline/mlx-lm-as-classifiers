@@ -214,4 +214,6 @@ still grows with the cached length" is not visible here.
   starts at 4 rows per expert. The kernel never runs where stock numerics
   come from a different kernel.
 - INT8 (`--int8`, story 2.3) patches dense MLPs and projections, not
-  `SwitchGLU`, so the two compose.
+  `SwitchGLU`, so the two compose. Since [2.8](2-8-moe-expert-int8.md),
+  `--int8` on the 26B also replaces the experts with a W4A8 kernel, which
+  supersedes this one on that model (0 layers swapped).

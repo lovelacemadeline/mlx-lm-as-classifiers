@@ -64,6 +64,14 @@ layer's MLP and attention projections for the vendored W8A8 kernel
 (:mod:`mlx_classifiers.int8`, Apple M5 / Metal 4 only). Calls under 64 rows
 fall back to the stock linear inside the wrapper, so the L=1 readout pass is
 stock either way; the cache-only prefill is where INT8 engages.
+
+MoE expert INT8 (story 2.8): on a 4-bit affine MoE (the 26B), ``int8=True`` also
+swaps every ``SwitchGLU`` for :class:`~mlx_classifiers.int8.experts.Int8SwitchGLU`
+(W4A8: the checkpoint's nibbles as the int4 operand, activations int8 per token).
+It replaces the stock expert weights, so it runs at every row count (the L=1
+readout included) and the story 3.6 kernel, which needs the stock encoding, is
+not applied (``moe_kernel_layers`` is 0). ``int8_expert_layers`` counts the swaps;
+``int8_experts=False`` keeps stock experts (with the 3.6 kernel) under ``int8``.
 """
 
 from __future__ import annotations
@@ -185,6 +193,8 @@ class MLXRunner:
     prefill_calls: list[tuple[int, int]] = field(default_factory=list)
     #: MoE layers running the per-expert kernel (story 3.6); 0 for the stock path.
     moe_kernel_layers: int = 0
+    #: MoE layers whose experts run the W4A8 kernel (story 2.8); 0 unless ``int8``.
+    int8_expert_layers: int = 0
 
     def __post_init__(self) -> None:
         if self.chat_template is None:
@@ -200,20 +210,26 @@ class MLXRunner:
         *,
         int8: bool = False,
         moe_kernel: bool = True,
+        int8_experts: bool = True,
         **kwargs: Any,
     ) -> MLXRunner:
         """Load ``repo`` with mlx-lm. ``int8=True`` then applies the W8A8 ``patch_mlps``
         and ``patch_projs`` (dequantise the checkpoint, requantise per output channel;
         it keeps the stock linears for the short-row fallback, so resident memory grows,
         about 3.4 to 5.2 GB on E2B). ``moe_kernel`` (default on) applies
-        :func:`mlx_classifiers.moe.patch_model` (story 3.6; bit-identical)."""
+        :func:`mlx_classifiers.moe.patch_model` (story 3.6; bit-identical). On a MoE,
+        ``int8`` with ``int8_experts`` (default) also runs the experts W4A8 (story 2.8),
+        which supersedes the 3.6 kernel on that model."""
         from mlx_lm import load
 
         model, tokenizer = load(repo)
+        expert_layers = 0
         if int8:
-            from .int8 import patch_model
+            from .int8 import patch_experts, patch_model
 
             patch_model(model)
+            if int8_experts:
+                expert_layers = patch_experts(model)
         layers = 0
         if moe_kernel:
             from .moe import patch_model as patch_moe
@@ -225,6 +241,7 @@ class MLXRunner:
             model_id=repo,
             int8=int8,
             moe_kernel_layers=layers,
+            int8_expert_layers=expert_layers,
             **kwargs,
         )
 

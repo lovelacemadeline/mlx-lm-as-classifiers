@@ -59,8 +59,8 @@ epics:
         title: Bounded-context mode — window the global layers with the rules prefix pinned as sinks
         status: pending
       - id: "2.8"
-        title: MoE expert INT8 for the 26B — vendor the expert-GEMM path from the August repo
-        status: pending
+        title: MoE expert INT8 for the 26B — vendor the W4A8 expert gather-GEMM (ling3-mlx kernel, int8-mlx affine fold)
+        status: completed
   - epic: 3
     title: Serving and calibration
     status: completed
