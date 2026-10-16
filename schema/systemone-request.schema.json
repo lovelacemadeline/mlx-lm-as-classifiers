@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://crosssense.com/schemas/systemone/v1/request.json",
+  "$id": "https://github.com/lovelacemadeline/mlx-lm-as-classifiers/schema/v1/request.json",
   "title": "SystemOneRequest",
   "description": "A decision request: one state, many named questions. Wire-compatible with TypeSafe Jev's POST /v1/systemone (ADR-0001) plus local extensions marked x-local.",
   "type": "object",

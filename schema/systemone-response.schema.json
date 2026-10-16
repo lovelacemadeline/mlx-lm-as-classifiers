@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://crosssense.com/schemas/systemone/v1/response.json",
+  "$id": "https://github.com/lovelacemadeline/mlx-lm-as-classifiers/schema/v1/response.json",
   "title": "SystemOneResponse",
   "type": "object",
   "required": ["model", "answers", "usage"],
