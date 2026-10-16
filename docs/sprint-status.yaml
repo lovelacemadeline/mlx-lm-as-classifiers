@@ -81,13 +81,13 @@ epics:
         status: completed
   - epic: 5
     title: Static decision battery (accuracy, calibration, position bias)
-    status: pending
+    status: in-progress
     story_home: docs/stories/
     stories_count: 2
     stories:
       - id: "5.1"
         title: Battery format and a seed set of labelled decisions
-        status: pending
+        status: completed
       - id: "5.2"
         title: Battery runner — accuracy, ECE, position-bias report
         status: pending
