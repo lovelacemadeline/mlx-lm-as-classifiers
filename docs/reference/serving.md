@@ -83,3 +83,30 @@ score). Lines without a label are skipped. `log(raw_probabilities)` is the
 option-logit row up to a constant, so fitting on it is fitting on logits. Each
 group is split with a seeded shuffle (`--heldout 0.3 --seed 0`); the printed
 ECE (`--bins 15`) and NLL before and after are on the held-out split.
+
+## Decision log
+
+`serve --log PATH` appends one JSONL line per answered question of every
+served decision (story [3.3](../stories/3-3-decision-log.md)); requests that
+answer 422 log nothing. Add a `label` to a line and it is calibrate input.
+
+```json
+{"v": 1, "ts": "2026-10-16T12:00:00.123+00:00", "request_hash": "sha256:...",
+ "model": "mlx-community/gemma-4-E2B-it-qat-4bit", "requested_model": "gemma-4-e2b-int8",
+ "readout": "first-token", "permutations": 1, "calibrated": true, "temperature": 1.84,
+ "question": "department", "type": "choice", "options": ["billing", "technical", "sales"],
+ "raw_probabilities": [0.02, 0.96, 0.02], "probabilities": [0.08, 0.85, 0.07],
+ "answer": "technical", "timing_ms": {"prefill": 31.2, "readout": 0.4, "total": 33.0}}
+```
+
+- `request_hash` is `sha256:` of the request's canonical JSON (sorted keys,
+  no whitespace); the lines of one request share it, and its `timing_ms`.
+- `model` is the served model id (the calibration key); `requested_model`
+  is the request's `model` string, present only when given.
+- `temperature` is the one applied (1 when uncalibrated or none fitted);
+  `probabilities` are what was served, `raw_probabilities` the `T = 1` row.
+- `answer` is the served choice, score index, or for noul `"yes"` when the
+  calibrated P(yes) is at least 0.5.
+
+Refit loop: serve with `--log`, label lines, `mlx-classifiers calibrate
+labelled.jsonl`, restart serve (it reads the config at startup).

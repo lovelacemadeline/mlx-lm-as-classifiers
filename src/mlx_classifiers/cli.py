@@ -44,6 +44,9 @@ def _add_server_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         help="calibration config (default: $MLX_CLASSIFIERS_CALIBRATION or ./calibration.json)",
     )
+    p.add_argument(
+        "--log", type=Path, default=None, help="append every served decision to this JSONL file"
+    )
     p.set_defaults(func=run)
 
 

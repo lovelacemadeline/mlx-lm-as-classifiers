@@ -27,6 +27,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from litestar import Litestar, Request, Response, post
@@ -35,6 +36,7 @@ from litestar.exceptions import SerializationException
 from pydantic import ValidationError
 
 from .decide import decide
+from .decision_log import DecisionLog, decision_records
 from .errors import ClassifierError
 from .fitting import CalibrationConfig, default_calibration_path
 from .runner import PrefixCache, Runner
@@ -127,6 +129,7 @@ class ServerState:
     worker: ThreadPoolExecutor
     generate: Generate | None = None
     temperature: Callable[[str, str], float | None] = field(default=lambda model, readout: None)
+    log: DecisionLog | None = None
 
     @property
     def model_id(self) -> str:
@@ -221,13 +224,13 @@ async def systemone(request: Request, state: State) -> Response:
 
 def _decide(s: ServerState, req: SystemOneRequest):
     """Run ``decide`` through the LRU; report whether its prefix was a hit."""
-    readout = req.effective_options.readout
+    opts = req.effective_options
+    fitted = s.temperature(s.model_id, opts.readout)
     hits, misses = s.prefixes.hits, s.prefixes.misses
-    resp = decide(
-        req,
-        CachingRunner(s.runner, s.prefixes),
-        temperature=s.temperature(s.model_id, readout),
-    )
+    resp = decide(req, CachingRunner(s.runner, s.prefixes), temperature=fitted)
+    if s.log is not None:  # story 3.3
+        applied = fitted if (opts.calibrated and fitted is not None) else 1.0
+        s.log.append(decision_records(req, resp, model=s.model_id, temperature=applied))
     if s.prefixes.hits > hits:
         hit = "hit"
     elif s.prefixes.misses > misses:
@@ -310,6 +313,7 @@ def create_app(
     generate: Generate | None = None,
     prefix_cache_size: int = 16,
     calibration: CalibrationConfig | None = None,
+    log: str | Path | DecisionLog | None = None,
 ) -> Litestar:
     """The Litestar app over one ``runner``, or the one ``load()`` builds.
 
@@ -318,7 +322,8 @@ def create_app(
     the chat route; it defaults to :func:`mlx_generate` when the runner is an
     ``MLXRunner`` and is otherwise off (the route answers 501). ``calibration``
     supplies the fitted temperature per (model, readout) (story 3.2); without
-    one, calibrated probabilities equal raw.
+    one, calibrated probabilities equal raw. ``log`` appends every served
+    decision to a JSONL file (story 3.3).
     """
     if (runner is None) == (load is None):
         raise ValueError("pass exactly one of runner or load")
@@ -333,6 +338,7 @@ def create_app(
         worker=worker,
         generate=generate,
         temperature=(calibration or CalibrationConfig()).temperature,
+        log=log if isinstance(log, DecisionLog) or log is None else DecisionLog(log),
     )
     return Litestar(
         route_handlers=[systemone, chat_completions],
@@ -346,10 +352,13 @@ def build_app_from_args(args: argparse.Namespace) -> Litestar:
     cal_path = args.calibration or default_calibration_path()
     calibration = CalibrationConfig.load_or_empty(cal_path)
     print(f"calibration: {cal_path} ({'loaded' if calibration.models else 'none fitted'})")
+    if args.log:
+        print(f"decision log: {args.log}")
     return create_app(
         load=lambda: MLXRunner.load(args.model),
         prefix_cache_size=args.prefix_cache_size,
         calibration=calibration,
+        log=args.log,
     )
 
 

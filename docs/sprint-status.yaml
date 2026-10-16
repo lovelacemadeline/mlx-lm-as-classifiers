@@ -54,7 +54,7 @@ epics:
         status: pending
   - epic: 3
     title: Serving and calibration
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 3
     stories:
@@ -66,10 +66,10 @@ epics:
         status: completed
       - id: "3.3"
         title: Decision log — every answer with its probabilities, for later refits
-        status: pending
+        status: completed
   - epic: 4
     title: Golden fixtures for the Swift + vision port
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 2
     stories:
@@ -78,7 +78,7 @@ epics:
         status: completed
       - id: "4.2"
         title: Fixture checker usable from another repo
-        status: pending
+        status: completed
   - epic: 5
     title: Static decision battery (accuracy, calibration, position bias)
     status: pending
