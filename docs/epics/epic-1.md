@@ -23,7 +23,7 @@ is unit-tested on any machine. The real runner (Epic 2) plugs in behind the
 | 1.2 | Runner interface and deterministic fake runner | completed |
 | 1.3 | Prompt compilation — chat template, prefix/state split, readout position | completed |
 | 1.4 | Option binding and prefix-tree first-token readout | completed |
-| 1.5 | Masked softmax, temperature calibration, confidence | ready-for-dev |
+| 1.5 | Masked softmax, temperature calibration, confidence | completed |
 | 1.6 | Sequence-scoring readout mode | pending |
 | 1.7 | Order permutation for position-bias reduction | pending |
 

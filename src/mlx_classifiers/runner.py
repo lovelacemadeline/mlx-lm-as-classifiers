@@ -230,6 +230,7 @@ class FakeRunner:
 
     tokenizer: ToyTokenizer = field(default_factory=ToyTokenizer)
     chat_template: ChatTemplate = field(default_factory=ToyChatTemplate)
+    model_id: str = "fake"
     logit_bias: dict[int, float] = field(default_factory=dict)
     logit_fn: Callable[[bytes, int], float] = _default_logit
     projected_rows: int = 0
