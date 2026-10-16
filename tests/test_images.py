@@ -300,3 +300,12 @@ def test_image_tokens_placeholder_text():
     png = square_png((0, 0, 0), size=48, w=96)
     n = spec.soft_tokens(png)
     assert spec.placeholder(png) == "<b>" + "<i>" * n + "<e>"
+
+
+def test_chunk_bounds_move_off_image_runs_for_bidirectional_models():
+    from mlx_classifiers.mlx_runner import _bounds_off_runs
+
+    assert _bounds_off_runs([0, 64, 128, 192], [(50, 100)]) == [0, 50, 128, 192]
+    assert _bounds_off_runs([0, 64, 128], [(0, 100)]) == [0, 100, 128]  # run at the start
+    assert _bounds_off_runs([0, 10, 20], []) == [0, 10, 20]
+    assert _bounds_off_runs([0, 64, 96, 128], [(40, 120)]) == [0, 40, 120, 128]

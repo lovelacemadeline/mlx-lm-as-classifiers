@@ -56,3 +56,136 @@ def test_encode_a_frame_gives_270_soft_tokens_deterministically(tower):
     b = tower.encode_pixels(tower.pixel_values(png))[0]
     assert a.shape == (270, 1536) and a.dtype == mx.bfloat16
     assert mx.array_equal(a, b).item()
+
+
+# --- story 6.3: the runner's image path ------------------------------------------------------
+
+import base64
+
+from mlx_classifiers import SystemOneRequest, decide
+from mlx_classifiers.prompt import compile_question
+from mlx_classifiers.prompt_cache import PromptCacheStore
+
+COLOURS = {"red": (220, 20, 20), "green": (20, 180, 20), "blue": (20, 20, 220)}
+QUESTION = {
+    "type": "choice",
+    "instructions": "What colour is the square in the picture?",
+    "criteria": {"red": None, "green": None, "blue": None, "yellow": None},
+}
+
+
+def square_b64(rgb) -> str:
+    rows = [
+        [rgb if 16 <= x < 80 and 16 <= y < 80 else (255, 255, 255) for x in range(96)]
+        for y in range(96)
+    ]
+    return base64.b64encode(write_png(96, 96, rows)).decode("ascii")
+
+
+def colour_request(
+    rgb, delta: bool = False, text: str = "Here is the picture:"
+) -> SystemOneRequest:
+    return SystemOneRequest.model_validate(
+        {
+            "prefix": "You look at pictures and answer questions.",
+            "state": [text, {"type": "image/png", "base64": square_b64(rgb)}],
+            "questions": {"q": QUESTION},
+            "options": {"delta_cache": delta},
+        }
+    )
+
+
+@pytest.fixture(scope="module")
+def runner():
+    from mlx_classifiers.mlx_runner import MLXRunner
+
+    return MLXRunner.load(GEMMA)
+
+
+def _raw(runner, req):
+    return decide(req, runner).answers["q"].raw_probabilities
+
+
+def test_text_only_decide_never_loads_the_vision_tower():
+    from mlx_classifiers.mlx_runner import MLXRunner
+
+    r = MLXRunner.load(GEMMA)
+    assert r.image_tokens is not None and r.vision is None
+    req = SystemOneRequest.model_validate({"state": "A red square.", "questions": {"q": QUESTION}})
+    decide(req, r)
+    assert r.vision is None and r.vision_encode_ms == []
+
+
+def test_the_model_sees_the_image(runner):
+    for name, rgb in COLOURS.items():
+        raw = _raw(runner, colour_request(rgb))
+        assert max(raw, key=raw.get) == name, raw
+
+
+def test_image_request_is_deterministic(runner):
+    req = colour_request(COLOURS["green"])
+    runner.vision.clear()  # re-encode on the second call too
+    assert _raw(runner, req) == _raw(runner, req)
+    runner.vision.clear()
+    assert _raw(runner, req) == _raw(runner, req)
+
+
+def test_embedding_path_on_text_rows_equals_the_token_id_path(runner):
+    """The vendored layer loop is mlx-lm's: on rows without an image it gives the
+    same hidden states, bit for bit, as the backbone over token ids."""
+    from mlx_lm.models.cache import make_prompt_cache
+
+    from mlx_classifiers.vision.merge import forward_embeddings, merged_embeddings
+
+    ids = mx.array(runner.tokenize("The quick brown fox jumps over the lazy dog. " * 4))
+    a = runner._backbone(ids[None], cache=make_prompt_cache(runner.model))
+    h = merged_embeddings(runner._backbone, ids, [])
+    b = forward_embeddings(runner._backbone, h, make_prompt_cache(runner.model), ids)
+    assert mx.array_equal(a, b).item()
+
+
+def test_cache_only_chunks_split_inside_an_image_agree(runner, monkeypatch):
+    """E2B is causal over image tokens, so a chunk boundary inside the run is exact
+    up to bf16 chunking noise."""
+    req = colour_request(COLOURS["blue"])
+    whole = _raw(runner, req)
+    monkeypatch.setattr(runner, "prefill_step", 64)
+    chunked = _raw(runner, req)
+    assert max(abs(whole[k] - chunked[k]) for k in whole) < 5e-3
+    assert max(chunked, key=chunked.get) == "blue"
+
+
+def test_delta_cache_keys_on_the_image_and_matches_uncached(runner, monkeypatch):
+    monkeypatch.setattr(runner, "prompt_cache", PromptCacheStore())
+    red, blue = (
+        colour_request(COLOURS["red"], delta=True),
+        colour_request(COLOURS["blue"], delta=True),
+    )
+    uncached_blue = _raw(runner, colour_request(COLOURS["blue"]))
+    decide(red, runner)
+    p = compile_question(
+        blue,
+        "q",
+        template=runner.chat_template,
+        tokenize=runner.tokenize,
+        image_tokens=runner.image_tokens,
+    )
+    runner.prefill_calls.clear()
+    out = decide(blue, runner).answers["q"].raw_probabilities
+    assert runner.prefill_calls[0][0] == p.images[0].start  # hit stops at the first soft token
+    assert max(abs(out[k] - uncached_blue[k]) for k in out) < 5e-3
+    assert max(out, key=out.get) == "blue"
+    runner.prefill_calls.clear()
+    again = decide(blue, runner).answers["q"].raw_probabilities
+    assert runner.prefill_calls[0][0] == p.readout_position  # same image: everything cached
+    assert max(abs(again[k] - uncached_blue[k]) for k in out) < 5e-3
+
+
+def test_int8_on_and_off_agree_on_image_requests(runner):
+    from mlx_classifiers.mlx_runner import MLXRunner
+
+    r8 = MLXRunner.load(GEMMA, int8=True)
+    for name, rgb in COLOURS.items():
+        stock, int8 = _raw(runner, colour_request(rgb)), _raw(r8, colour_request(rgb))
+        assert max(int8, key=int8.get) == max(stock, key=stock.get) == name
+        assert max(abs(stock[k] - int8[k]) for k in stock) < 5e-3

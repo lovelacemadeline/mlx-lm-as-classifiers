@@ -123,7 +123,7 @@ epics:
         status: completed
       - id: "6.3"
         title: MLXRunner image path — encode, merge embeddings, same split prefill
-        status: pending
+        status: completed
       - id: "6.4"
         title: Parity test against mlx-vlm as a dev-only reference
         status: pending
