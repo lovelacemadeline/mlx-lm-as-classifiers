@@ -1,6 +1,6 @@
 ---
 type: epic
-status: in-progress
+status: completed
 title: Static decision battery (accuracy, calibration, position bias)
 epic: 5
 owner: maddie
@@ -20,7 +20,7 @@ benchmark any backend.
 | id | title | status |
 |---|---|---|
 | 5.1 | Battery format and a seed set of labelled decisions | completed |
-| 5.2 | Battery runner — accuracy, ECE, position-bias report | pending |
+| 5.2 | Battery runner — accuracy, ECE, position-bias report | completed |
 
 ## Related
 - [PRD](../product/prd-system-one-classifier.md), ADR-0001

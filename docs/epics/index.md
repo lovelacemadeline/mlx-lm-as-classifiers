@@ -17,4 +17,4 @@ are unique forever — never reuse one, even for abandoned epics.
 | 2 | [Gemma 4 E2B INT8 runner on MLX](epic-2.md) | in-progress |
 | 3 | [Serving and calibration](epic-3.md) | pending |
 | 4 | [Golden fixtures for the Swift + vision port](epic-4.md) | pending |
-| 5 | [Static decision battery](epic-5.md) | in-progress |
+| 5 | [Static decision battery](epic-5.md) | completed |

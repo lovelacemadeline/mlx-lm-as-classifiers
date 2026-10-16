@@ -79,7 +79,7 @@ prefix perturbations.
   answer texts (no descriptions), so permutations reorder real content.
 - Agent block: 16 robot cases (forward / left / right / stop) and 14
   coding-agent step-routing cases (search_docs / run_tests / edit_file /
-  ask_user / finish), 9 easy and 21 near-miss. Each is a perturbation group:
+  ask_user / finish), 11 easy and 19 near-miss. Each is a perturbation group:
   the base case plus 2 to 3 prefix variants that add incidental text ("The
   robot is in a room.", "Today is Tuesday.", "The user is a developer.") or
   reword the role, with the same gold. `robot-01` and `robot-05` are the

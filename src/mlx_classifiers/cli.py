@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    from . import bench, fitting, fixtures
+    from . import battery, bench, fitting, fixtures
 
     parser = argparse.ArgumentParser(prog="mlx-classifiers")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -22,6 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("calibrate", help="fit temperatures from labelled decisions (3.2)")
     fitting.add_arguments(c)
     c.set_defaults(func=fitting.main)
+    bt = sub.add_parser("battery", help="static decision battery: accuracy, ECE, bias (5.2)")
+    battery.add_arguments(bt)
     args = parser.parse_args(argv)
     return args.func(args)
 
