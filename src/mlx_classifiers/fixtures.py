@@ -554,13 +554,16 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     c.add_argument("--model", default=None, help="with --runner mlx (default: the fixtures')")
     c.add_argument("--prob-tol", type=float, default=DEFAULT_PROB_TOL)
     c.add_argument("--logit-tol", type=float, default=None, help="also gate raw logits")
+    c.add_argument(
+        "--int8", action="store_true", help="with --runner mlx: load the W8A8 kernels (2.3)"
+    )
     c.set_defaults(func=_cmd_check)
 
 
-def _load_runner(repo: str) -> Any:
+def _load_runner(repo: str, int8: bool = False) -> Any:
     from .mlx_runner import MLXRunner
 
-    return MLXRunner.load(repo)
+    return MLXRunner.load(repo, int8=int8)
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
@@ -572,7 +575,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 def _cmd_check(args: argparse.Namespace) -> int:
     fxs = load_fixtures(args.fixtures_dir)
     if args.runner == "mlx":
-        runner = _load_runner(args.model or fxs[0]["model"]["repo"])
+        runner = _load_runner(args.model or fxs[0]["model"]["repo"], int8=args.int8)
         results: ResultsSource = lambda fx: run_case(fx, runner)
     else:
         results = args.results

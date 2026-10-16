@@ -42,7 +42,7 @@ epics:
         status: completed
       - id: "2.3"
         title: INT8 kernel wiring into the runner
-        status: pending
+        status: completed
       - id: "2.4"
         title: Decisions-per-second benchmark harness
         status: completed

@@ -12,7 +12,8 @@ binding are done once per cell and not timed.
 
 Writes ``bench_runs/bench-<timestamp>.md`` and ``.json`` with the model id,
 git revision, machine and power state (macOS ``pmset``; recorded, never
-changed). INT8 on/off is a column for when story 2.3 lands; today it is "off".
+changed). The INT8 column is the runner's ``int8`` flag (story 2.3); run with
+``--int8`` to load the W8A8 kernels.
 """
 
 from __future__ import annotations
@@ -133,7 +134,7 @@ def run_bench(
                     state_tokens=n_state,
                     prompt_tokens=len(prompt.tokens),
                     prefix_cached=use_cache,
-                    int8=False,
+                    int8=bool(getattr(runner, "int8", False)),
                     prefilled_tokens=prefilled,
                     reps=reps,
                     p50_ms=p50 * 1e3,
@@ -228,12 +229,13 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--reps", type=int, default=20)
     p.add_argument("--warmup", type=int, default=2)
     p.add_argument("--out", type=Path, default=Path("bench_runs"))
+    p.add_argument("--int8", action="store_true", help="load with the W8A8 INT8 kernels (M5)")
 
 
 def main(args: argparse.Namespace) -> int:
     from .mlx_runner import MLXRunner
 
-    runner = MLXRunner.load(args.model)
+    runner = MLXRunner.load(args.model, int8=args.int8)
     env = environment(args.model)
     rows = run_bench(runner, args.lengths, reps=args.reps, warmup=args.warmup)
     md, js = write_results(env, rows, args.out)
