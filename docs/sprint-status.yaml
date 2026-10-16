@@ -62,7 +62,7 @@ epics:
     title: Serving and calibration
     status: in-progress
     story_home: docs/stories/
-    stories_count: 4
+    stories_count: 5
     stories:
       - id: "3.1"
         title: /v1/systemone route beside chat completions
@@ -76,6 +76,9 @@ epics:
       - id: "3.4"
         title: Delta prefix caching on the longest common token prefix
         status: pending
+      - id: "3.5"
+        title: Chat route honours max_tokens and a per-call thinking toggle
+        status: completed
   - epic: 4
     title: Golden fixtures for the Swift + vision port
     status: completed

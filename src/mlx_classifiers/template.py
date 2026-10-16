@@ -3,6 +3,11 @@
 A :class:`ChatTemplate` returns the full prompt text and the text of its
 cacheable prefix (the system turn). Runners expose one as ``chat_template`` so
 prompt compilation needs nothing but a Runner.
+
+Decisions always render with thinking off (:meth:`ChatTemplate.render`). Only
+the chat route's :meth:`ChatTemplate.render_messages` takes a per-call
+``enable_thinking`` (story 3.5); the template's :class:`ThinkingMarkers` say how
+the model brackets its trace in the generated tokens.
 """
 
 from __future__ import annotations
@@ -13,7 +18,31 @@ from typing import Any, Protocol
 
 from .errors import PromptError
 
-__all__ = ["ChatTemplate", "HFChatTemplate", "RenderedChat", "ToyChatTemplate"]
+__all__ = [
+    "GEMMA_THINKING",
+    "ChatTemplate",
+    "HFChatTemplate",
+    "RenderedChat",
+    "ThinkingMarkers",
+    "ToyChatTemplate",
+]
+
+
+@dataclass(frozen=True)
+class ThinkingMarkers:
+    """How a model brackets its thinking trace in generated text.
+
+    The trace is the text between ``start`` and ``end``; a leading ``channel``
+    name (Gemma's ``thought\\n``) is dropped from it.
+    """
+
+    start: str
+    end: str
+    channel: str = ""
+
+
+#: Gemma 4: ``<|channel>thought\n ... <channel|>`` then the answer.
+GEMMA_THINKING = ThinkingMarkers(start="<|channel>", end="<channel|>", channel="thought\n")
 
 
 @dataclass(frozen=True)
@@ -32,10 +61,19 @@ class RenderedChat:
 class ChatTemplate(Protocol):
     def render(self, system: str | None, user: str) -> RenderedChat: ...
 
-    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+    def render_messages(
+        self, messages: Sequence[dict[str, str]], *, enable_thinking: bool = False
+    ) -> RenderedChat:
         """A whole chat (``role``/``content`` dicts) with the assistant turn opened.
         ``prefix_text`` is the system turn exactly as :meth:`render` gives it, so
-        a chat and a decision with the same system text share a prefix cache."""
+        a chat and a decision with the same system text share a prefix cache.
+        ``enable_thinking`` renders this one call with the model's thinking mode
+        on (which may change the system turn, and so the prefix)."""
+        ...
+
+    @property
+    def thinking(self) -> ThinkingMarkers | None:
+        """The markers around a generated thinking trace, if the model has any."""
         ...
 
     @property
@@ -48,6 +86,8 @@ class ToyChatTemplate:
     """The FakeRunner's template, in :class:`~mlx_classifiers.runner.ToyTokenizer` markup."""
 
     generation_prompt = "<|assistant|>\n"
+    #: Toy markup mirroring Gemma's: a ``<|think|>`` line opens the system turn.
+    thinking = ThinkingMarkers(start="<|channel|>", end="<|channelend|>", channel="thought\n")
 
     def render(self, system: str | None, user: str) -> RenderedChat:
         prefix = "<|bos|>" + (f"<|system|>\n{system}<|end|>\n" if system is not None else "")
@@ -56,9 +96,13 @@ class ToyChatTemplate:
             text=f"{prefix}<|user|>\n{user}<|end|>\n{self.generation_prompt}",
         )
 
-    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+    def render_messages(
+        self, messages: Sequence[dict[str, str]], *, enable_thinking: bool = False
+    ) -> RenderedChat:
         msgs = list(messages)
         system = msgs.pop(0)["content"] if msgs and msgs[0]["role"] == "system" else None
+        if enable_thinking:
+            system = "<|think|>\n" + (system or "")
         prefix = "<|bos|>" + (f"<|system|>\n{system}<|end|>\n" if system is not None else "")
         turns = "".join(f"<|{m['role']}|>\n{m['content']}<|end|>\n" for m in msgs)
         return RenderedChat(
@@ -71,16 +115,27 @@ class HFChatTemplate:
     """Adapter over any tokenizer exposing Hugging Face ``apply_chat_template``.
 
     Thinking modes are switched off (``enable_thinking=False``) so the token
-    after the generation prompt is the answer itself.
+    after the generation prompt is the answer itself. Only
+    :meth:`render_messages` (the chat route) can switch it on, per call.
+    ``thinking`` defaults to Gemma 4's markers.
     """
 
-    def __init__(self, tokenizer: Any, **template_kwargs: Any):
+    def __init__(
+        self,
+        tokenizer: Any,
+        thinking: ThinkingMarkers | None = GEMMA_THINKING,
+        **template_kwargs: Any,
+    ):
         self.tokenizer = tokenizer
+        self.thinking = thinking
         self.template_kwargs = {"enable_thinking": False, **template_kwargs}
 
-    def _apply(self, messages: list[dict[str, str]], generation: bool) -> str:
+    def _apply(self, messages: list[dict[str, str]], generation: bool, **overrides: Any) -> str:
         return self.tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=generation, **self.template_kwargs
+            messages,
+            tokenize=False,
+            add_generation_prompt=generation,
+            **{**self.template_kwargs, **overrides},
         )
 
     @property
@@ -99,12 +154,15 @@ class HFChatTemplate:
             raise PromptError("chat template renders the system turn differently in context")
         return RenderedChat(prefix_text=prefix, text=text)
 
-    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+    def render_messages(
+        self, messages: Sequence[dict[str, str]], *, enable_thinking: bool = False
+    ) -> RenderedChat:
         msgs = [{"role": m["role"], "content": m["content"]} for m in messages]
-        text = self._apply(msgs, True)
+        mode = {"enable_thinking": True} if enable_thinking else {}
+        text = self._apply(msgs, True, **mode)
         prefix = ""
         if msgs and msgs[0]["role"] == "system":
-            prefix = self._apply(msgs[:1], False)
+            prefix = self._apply(msgs[:1], False, **mode)
             if not text.startswith(prefix):
                 prefix = ""  # template folds the system turn in; no shareable head
         return RenderedChat(prefix_text=prefix, text=text)

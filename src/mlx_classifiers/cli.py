@@ -41,6 +41,12 @@ def _add_server_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--prefix-cache-size", type=int, default=16, help="prefix KV caches kept (LRU)")
     p.add_argument(
+        "--max-tokens-ceiling",
+        type=int,
+        default=8192,
+        help="largest max_tokens a chat request may ask for (above it: 422)",
+    )
+    p.add_argument(
         "--calibration",
         type=Path,
         default=None,

@@ -33,10 +33,65 @@ curl -s localhost:8080/v1/systemone -H 'content-type: application/json' -d '{
   an option-text name that is not one token answers 422 the same way. The
   calibration temperature is keyed by `(model, readout)` only, so an
   option-text request uses the first-token temperature.
-- `POST /v1/chat/completions` — a thin, non-streaming OpenAI-style chat
-  completion on the same weights (`messages`, `max_tokens`, `temperature`;
-  `usage.prompt_tokens_details.cached_tokens`). It exists to prove the
-  single-process story, not to replace a full chat server.
+- `POST /v1/chat/completions` — a non-streaming OpenAI-style chat
+  completion on the same weights (`messages`, `max_tokens`, `temperature`,
+  `enable_thinking`). Not a full chat server (no streaming, tools or
+  sampling knobs beyond temperature); see
+  [Thinking and max_tokens](#thinking-and-max_tokens) for what it honours.
+
+## Thinking and max_tokens
+
+Story [3.5](../stories/3-5-chat-max-tokens-and-thinking-toggle.md). A
+planning call (the gridworld's System Two) sends:
+
+```json
+{"messages": [{"role": "system", "content": "<the decision prefix text>"},
+              {"role": "user", "content": "<the planning prompt>"}],
+ "max_tokens": 4096, "enable_thinking": true, "temperature": 0}
+```
+
+- **`max_tokens`** (or `max_completion_tokens`, which wins if both are sent):
+  default 512. Honoured exactly up to the server ceiling
+  `serve --max-tokens-ceiling` (default 8192); above it, or not a positive
+  integer, answers **422** naming the field and the ceiling. Never capped
+  silently.
+- **`finish_reason`**: `stop` when the model emits an end-of-turn id (the
+  tokenizer's `eos_token_ids`; Gemma 4: `<eos>`, `<turn|>`, and id 50),
+  `length` when `max_tokens` tokens were generated.
+- **`usage`**: `prompt_tokens` (whole rendered prompt), `completion_tokens`
+  (generated, including the stop token), `total_tokens`,
+  `prompt_tokens_details.cached_tokens` (prefix tokens reused) and
+  `completion_tokens_details.reasoning_tokens`.
+- **`enable_thinking`** (bool, default false; anything else is 422): renders
+  this call's prompt with the chat template's `enable_thinking=True`. Gemma 4
+  puts `<|think|>\n` at the top of the system turn. Decisions always render
+  with thinking off, whatever chats ask for.
+
+**Marker handling.** The route splits the generated token ids (not the
+text) on the template's markers; Gemma 4's are `<|channel>` (id 100) and
+`<channel|>` (id 101), with the channel name `thought\n` after the start:
+
+1. No `<|channel>` in the output: `message.content` is the whole text, there
+   is no `message.reasoning` key, `reasoning_tokens` is 0.
+2. `<|channel>` ... `<channel|>`: `message.reasoning` is the text between
+   them with a leading `thought\n` dropped; `message.content` is the text
+   outside the span (normally only what follows `<channel|>`). Both are
+   whitespace-trimmed. `reasoning_tokens` counts the span including both
+   markers.
+3. `<|channel>` with no `<channel|>` (cut off by `max_tokens`, so
+   `finish_reason` is `length`): everything after the start marker is
+   `reasoning`, `content` is `""`.
+
+The split applies whenever the markers appear, thinking requested or not.
+
+**KV.** Generation runs on a deep copy of the prefix KV, never the LRU's
+entry. A plain chat uses the LRU like a decision (it may insert its system
+turn). A thinking chat only *peeks*: it uses an entry already keyed by its
+rendered system-turn tokens, but never inserts one, bumps recency or counts a
+hit or miss, so a planning call cannot evict a decision prefix. With Gemma 4
+the thinking system turn differs from the decision's (`<|think|>`), so a plan
+call prefills its own prefix (`x-prefix-cache: miss`); a template that leaves
+the system turn alone (Qwen3) shares the decision's entry read-only.
 
 ## The shared prefix cache
 
