@@ -45,7 +45,7 @@ epics:
         status: pending
       - id: "2.4"
         title: Decisions-per-second benchmark harness
-        status: pending
+        status: completed
       - id: "2.5"
         title: KV-consumer layers run on the readout row only
         status: in-progress

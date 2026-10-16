@@ -25,7 +25,7 @@ KV-consumer layers, so the readout must run them on the readout row only
 | 2.1 | Recon — locate the E2B INT8 kernels and any vendored VLM internals | completed |
 | 2.2 | MLX runner — load, cached prefix, prefill, readout-position slice | completed |
 | 2.3 | INT8 kernel wiring into the runner | pending |
-| 2.4 | Decisions-per-second benchmark harness | pending |
+| 2.4 | Decisions-per-second benchmark harness | completed |
 | 2.5 | KV-consumer layers run on the readout row only | in-progress |
 | 2.6 | INT8 attention router with proper Q-side length padding | pending |
 
