@@ -126,7 +126,7 @@ epics:
         status: completed
       - id: "6.4"
         title: Parity test against mlx-vlm as a dev-only reference
-        status: pending
+        status: completed
       - id: "6.5"
         title: Image fixtures and a battery slice with images
         status: pending

@@ -17,6 +17,10 @@ mlx = ["mlx-lm>=0.31.3"]
 # Image blocks (Epic 6): the vendored Gemma 4 vision path needs Pillow to decode
 # and resize PNGs. No mlx-vlm at runtime.
 vision = ["mlx-lm>=0.31.3", "pillow>=10.3"]
+# Dev-only reference for the story 6.4 parity test; never imported at runtime.
+# mlx-vlm 0.7.8 needs mlx >= 0.32.3, so installing it here moves the mlx pin; the
+# test also runs against a separate venv via MLX_VLM_PYTHON.
+vision-dev = ["mlx-vlm>=0.7.8"]
 server = ["litestar>=2.12", "uvicorn>=0.30"]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
 
