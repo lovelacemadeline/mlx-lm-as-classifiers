@@ -18,3 +18,4 @@ are unique forever — never reuse one, even for abandoned epics.
 | 3 | [Serving and calibration](epic-3.md) | in-progress |
 | 4 | [Golden fixtures for the Swift + vision port](epic-4.md) | completed |
 | 5 | [Static decision battery](epic-5.md) | completed |
+| 6 | [Vision runner — image blocks, vendored Gemma 4 vision path](epic-6.md) | pending |
