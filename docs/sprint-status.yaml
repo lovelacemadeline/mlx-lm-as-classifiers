@@ -18,7 +18,7 @@ epics:
         status: completed
       - id: "1.4"
         title: Option binding and prefix-tree first-token readout
-        status: ready-for-dev
+        status: completed
       - id: "1.5"
         title: Masked softmax, temperature calibration, confidence
         status: ready-for-dev
