@@ -19,10 +19,14 @@ bit for bit on a tiny random tower (CPU). What changes, per stage:
   (no padding) and hands it to SDPA in every layer; here ``mask=None``.
 - **No host sync**: the slow path's ``.item()`` (number of valid pooled rows, always
   ``L / 9`` here) is dropped, so tower + projector are one graph.
-- **mx.compile** (``compile=True``): the whole forward, traced once per pinned input
-  shape, so the per-layer float32 RMS-norm round trips, clips, RoPE, GELU and residuals
-  fuse. Weights and per-shape tables are captured as constants: call :meth:`clear`
-  after reloading weights.
+- **mx.compile** (``compile=True``): each layer runs as two compiled segments, traced
+  once per pinned input shape -- (input norm, q/k/v projections) and (RoPE, SDPA, o_proj,
+  post-attention norm, residual, MLP, residual) -- so clips, RoPE, GELU and residuals
+  fuse. The float32 q/k/v RMS norms between them stay **eager**: compiled, MLX fuses
+  their ``x ** 2`` differently from the eager Metal ``pow`` (about 1 ulp in float32),
+  which grows to max |d| 0.08 in the soft tokens after 16 layers (story 6.6). Compiling
+  the whole forward is ~4 ms faster on E2B but not bit-exact. Weights and per-shape
+  tables are captured as constants: call :meth:`clear` after reloading weights.
 """
 
 from __future__ import annotations
@@ -56,7 +60,8 @@ class _Shape:
         self.rope = _rope_tables(pos, enc.head_dim, enc.rope_base)
         self.pool = _pool_weights(pos, num_real, self.length)
         mx.eval(self.pos_emb, self.rope, self.pool)
-        self.fn = None
+        #: Compiled ``(qkv, post)`` per layer (``compile=True``), built on first use.
+        self.fns: list | None = None
 
 
 def _rope_tables(positions: mx.array, head_dim: int, base: float):
@@ -133,8 +138,22 @@ class FastEncoder:
         return self.vm.patch_embedder.input_proj(x) + sh.pos_emb
 
     def layers(self, h: mx.array, sh: _Shape) -> mx.array:
-        for layer in self.vm.encoder.layers:
-            h = _block(layer, h, sh.rope)
+        layers = self.vm.encoder.layers
+        if not self.compile:
+            for layer in layers:
+                h = _block(layer, h, sh.rope)
+            return h
+        if sh.fns is None:
+            sh.fns = [
+                (
+                    mx.compile(lambda x, _l=layer: _qkv(_l, x)),
+                    mx.compile(lambda x, q, k, v, _l=layer: _post(_l, x, q, k, v, sh.rope)),
+                )
+                for layer in layers
+            ]
+        for layer, (qkv, post) in zip(layers, sh.fns, strict=True):
+            q, k, v = _norms(layer.self_attn, *qkv(h))
+            h = post(h, q, k, v)
         return h
 
     def pool(self, h: mx.array, sh: _Shape) -> mx.array:
@@ -157,34 +176,39 @@ class FastEncoder:
     def encode_uint8(self, image: np.ndarray | mx.array) -> mx.array:
         """``[N, text_hidden]`` (lazy) for a resized ``[H, W, 3]`` uint8 image."""
         image = mx.array(image) if not isinstance(image, mx.array) else image
-        sh = self.shape(int(image.shape[0]), int(image.shape[1]))
-        if not self.compile:
-            return self.forward(image, sh)
-        if sh.fn is None:
-            sh.fn = mx.compile(lambda img, _sh=sh: self.forward(img, _sh))
-        return sh.fn(image)
+        return self.forward(image, self.shape(int(image.shape[0]), int(image.shape[1])))
 
     def encode_png(self, png: bytes) -> mx.array:
         return self.encode_uint8(self.uint8(png))
 
 
-def _block(layer: Any, x: mx.array, rope) -> mx.array:
-    """``VisionTransformerBlock.__call__`` with precomputed RoPE tables and no mask."""
-    normed = layer.input_layernorm(x)
-    attn_out = layer.post_attention_layernorm(_attention(layer.self_attn, normed, rope))
-    h = x + attn_out
+def _qkv(layer: Any, x: mx.array):
+    """Input norm and the q/k/v projections, ``[B, L, heads, head_dim]`` each."""
+    attn, (B, L, _) = layer.self_attn, x.shape
+    n = layer.input_layernorm(x)
+    q = attn.q_proj(n).reshape(B, L, attn.num_heads, attn.head_dim)
+    k = attn.k_proj(n).reshape(B, L, attn.num_kv_heads, attn.head_dim)
+    v = attn.v_proj(n).reshape(B, L, attn.num_kv_heads, attn.head_dim)
+    return q, k, v
+
+
+def _norms(attn: Any, q: mx.array, k: mx.array, v: mx.array):
+    """The float32 q/k/v RMS norms (kept out of ``mx.compile``: see module doc)."""
+    return attn.q_norm(q), attn.k_norm(k), attn._v_norm(v)
+
+
+def _post(layer: Any, x: mx.array, q: mx.array, k: mx.array, v: mx.array, rope) -> mx.array:
+    """RoPE, SDPA (``mask=None``), o_proj, then the rest of the block."""
+    attn, (B, L, _) = layer.self_attn, x.shape
+    q, k = _rope(q, rope), _rope(k, rope)
+    q, k, v = (t.transpose(0, 2, 1, 3) for t in (q, k, v))
+    out = _ensure_fused_sdpa(q, k, v, scale=1.0, mask=None)
+    out = attn.o_proj(out.transpose(0, 2, 1, 3).reshape(B, L, -1))
+    h = x + layer.post_attention_layernorm(out)
     ffw_out = layer.post_feedforward_layernorm(layer.mlp(layer.pre_feedforward_layernorm(h)))
     return h + ffw_out
 
 
-def _attention(attn: Any, x: mx.array, rope) -> mx.array:
-    """``VisionAttention.__call__`` with precomputed RoPE tables and ``mask=None``."""
-    B, L, _ = x.shape
-    q = attn.q_proj(x).reshape(B, L, attn.num_heads, attn.head_dim)
-    k = attn.k_proj(x).reshape(B, L, attn.num_kv_heads, attn.head_dim)
-    v = attn.v_proj(x).reshape(B, L, attn.num_kv_heads, attn.head_dim)
-    q, k, v = attn.q_norm(q), attn.k_norm(k), attn._v_norm(v)
-    q, k = _rope(q, rope), _rope(k, rope)
-    q, k, v = (t.transpose(0, 2, 1, 3) for t in (q, k, v))
-    out = _ensure_fused_sdpa(q, k, v, scale=1.0, mask=None)
-    return attn.o_proj(out.transpose(0, 2, 1, 3).reshape(B, L, -1))
+def _block(layer: Any, x: mx.array, rope) -> mx.array:
+    """``VisionTransformerBlock.__call__`` with precomputed RoPE tables and no mask."""
+    return _post(layer, x, *_norms(layer.self_attn, *_qkv(layer, x)), rope)

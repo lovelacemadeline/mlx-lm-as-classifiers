@@ -150,9 +150,10 @@ def test_one_trace_per_pinned_shape():
     for seed in (1, 2, 3):
         enc.encode_png(_png(seed=seed))
     assert list(enc._shapes) == [key]
-    fn = enc._shapes[key].fn
+    fns = enc._shapes[key].fns
+    assert fns is not None and len(fns) == 2
     enc.encode_png(_png(seed=4))
-    assert enc._shapes[key].fn is fn
+    assert enc._shapes[key].fns is fns
 
 
 def test_vision_tower_fast_flag_memoises_and_matches_slow():
@@ -175,8 +176,8 @@ def test_pool_weights_match_the_pooler():
     assert _equal(w, one_hot(mx.argmax(w, axis=-1), 6) / 9)
 
 
-def test_runner_vision_fast_defaults_off():
+def test_runner_vision_fast_defaults_on_and_the_tower_keeps_the_slow_reference():
     from mlx_classifiers.mlx_runner import MLXRunner
 
-    assert MLXRunner.__dataclass_fields__["vision_fast"].default is False
-    assert VisionTower(_config(), 64).fast is False
+    assert MLXRunner.__dataclass_fields__["vision_fast"].default is True
+    assert VisionTower(_config(), 64).fast is False  # the vendored path, unless asked

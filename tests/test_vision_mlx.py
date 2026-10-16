@@ -189,3 +189,15 @@ def test_int8_on_and_off_agree_on_image_requests(runner):
         stock, int8 = _raw(runner, colour_request(rgb)), _raw(r8, colour_request(rgb))
         assert max(int8, key=int8.get) == max(stock, key=stock.get) == name
         assert max(abs(stock[k] - int8[k]) for k in stock) < 5e-3
+
+
+def test_vision_fast_is_bit_equal_to_the_vendored_path(tower):
+    """Story 6.6: the compiled fast path reproduces the vendored tower on the GPU."""
+    enc = tower.fast_encoder()
+    assert enc.compile
+    for colour in ((40, 160, 40), (200, 30, 30), (20, 20, 220)):
+        png = frame_png(colour)
+        slow = tower.encode_pixels(tower.pixel_values(png))[0]
+        fast = enc.encode_png(png)
+        assert fast.shape == slow.shape == (270, 1536) and fast.dtype == slow.dtype
+        assert mx.array_equal(fast, slow).item()

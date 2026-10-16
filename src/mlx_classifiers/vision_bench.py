@@ -155,7 +155,10 @@ def render_markdown(env: dict[str, Any], rows: list[VisionRow]) -> str:
     head = [
         "# Image decisions/s benchmark",
         "",
-        f"- model: `{env['model']}`  git: `{env['git_rev']}`  int8: {env.get('int8')}",
+        (
+            f"- model: `{env['model']}`  git: `{env['git_rev']}`  int8: {env.get('int8')}"
+            f"  vision_fast: {env.get('vision_fast')}"
+        ),
         f"- machine: {env['machine']} ({env['platform']})",
         f"- power: `{env['lowpowermode']}`; {env['power_source']}",
         f"- versions: {env['versions']}  timestamp: {env['timestamp']}",
@@ -199,11 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--model", default=DEFAULT_MODEL)
     p.add_argument("--int8", action="store_true")
+    p.add_argument(
+        "--vision-slow", action="store_true", help="the vendored encode path (story 6.6 reference)"
+    )
     p.add_argument("--battery", type=Path, default=BATTERY)
     p.add_argument("--out", type=Path, default=Path("bench_runs"))
     args = p.parse_args(argv)
-    runner = MLXRunner.load(args.model, int8=args.int8, vision=True)
-    env = environment(args.model) | {"int8": args.int8}
+    runner = MLXRunner.load(
+        args.model, int8=args.int8, vision=True, vision_fast=not args.vision_slow
+    )
+    env = environment(args.model) | {"int8": args.int8, "vision_fast": not args.vision_slow}
     import mlx.core as mx
 
     env["swapouts_before"] = _swapouts()

@@ -1,6 +1,6 @@
 ---
 type: story
-status: in-progress
+status: completed
 title: Vision encoder speed — 675 ms per frame on the 26B is not the hardware
 owner: maddie
 updated: 2026-10-16
@@ -14,7 +14,9 @@ anchor:
   - test: "tests/test_vision_fast.py::test_position_embedding_gather_equals_the_one_hot_matmul"
   - test: "tests/test_vision_fast.py::test_uint8_lookup_patchify_equals_the_float32_patchify"
   - test: "tests/test_vision_fast.py::test_one_trace_per_pinned_shape"
-  - test: "tests/test_vision_fast.py::test_runner_vision_fast_defaults_off"
+  - test: "tests/test_vision_fast.py::test_runner_vision_fast_defaults_on_and_the_tower_keeps_the_slow_reference"
+  - test: "tests/test_vision_mlx.py::test_vision_fast_is_bit_equal_to_the_vendored_path"
+  - symbol: "src/mlx_classifiers/vision_bench.py::main"
 ---
 
 # Story 6.6 — Vision encoder speed
@@ -114,76 +116,144 @@ The rest of the checklist, found not to be causes:
   sha256. Nothing is re-read or re-cast per call beyond the per-layer
   `weight.astype(float32)` of the `[head_dim]` q/k norm scales.
 
-### Draft fix: `vision_fast` (default off)
+## The fix: `vision_fast` (default on since this story)
 
 `vision/fast.py::FastEncoder` runs the tower's own modules for the runner's one
-case (one image, no padding). The vendored path is untouched and stays the
-reference. `MLXRunner(vision_fast=True)` → `load_vision_tower(fast=True)` →
-`VisionTower.encode_png` uses it. Changes, each meant to be bit-exact:
+case: one image, no padding. The vendored path is untouched and stays the
+reference: `MLXRunner(vision_fast=False)`, or `vision_bench --vision-slow`.
+`MLXRunner.vision_fast` (default **True**) → `load_vision_tower(fast=True)` →
+`VisionTower.encode_png`. Every change is bit-exact:
 
 - position embedding: `table[0][x] + table[1][y]`, a gather, cached per image
-  shape (a one-hot row times the table is exactly that row);
-- RoPE cos/sin, patch positions and pooling weights: cached per shape and reused
-  by every layer;
-- `mask=None` in SDPA (adding exact zeros); no `.item()`;
+  shape;
+- RoPE cos/sin, patch positions and pooling weights: cached per shape;
+- `mask=None` in SDPA; no `.item()`;
 - preprocess: PIL to uint8 (`processor.resized_uint8`, which `preprocess_png`
   now calls), uploaded as uint8; `x / 255` then `2 (x - 0.5)` become a 256-entry
-  lookup table built with exactly those float32 ops, so the bf16 patch inputs
-  are identical;
-- `mx.compile` over the whole forward (embed, layers, pool, projector), traced
-  once per pinned shape and cached (`compile=False` to turn it off).
+  lookup table built with exactly those float32 ops;
+- `mx.compile` per layer in **two segments**: (input norm, q/k/v projections)
+  and (RoPE, SDPA, o_proj, post norm, residual, MLP, residual). Each is traced
+  once per pinned shape. The float32 q/k/v RMS norms between the segments stay
+  eager.
 
-`tests/test_vision_fast.py` (CPU device, a random 2-layer bf16 tower with a
-4-bit projector, E2B-like / 26B-like / padded-head variants): every stage and
-the end-to-end soft tokens are **bit-equal** to the slow path, compiled and not.
-CPU equality does not prove GPU equality: SDPA with and without a mask, and the
-fused compiled kernels, are different Metal code. The profile checks that.
+**Why the norms stay out of compile.** The first draft compiled the whole
+forward. On the GPU it was 130 ms on E2B but **not bit-equal** (max |d| 0.11 in
+the soft tokens). Bisecting by compiling one module class at a time: clipped
+linears, MLP, the fast RMSNorm and RoPE all compile bit-exactly. The float32
+`VisionRMSNorm` / `VisionRMSNormNoScale` do not. Isolated, eager `x ** 2` (Metal
+`pow`) and the fused square differ by about 1 ulp in float32 (rel 1.2e-7), and
+16 layers grow that to 0.08 to 0.11. Leaving the three norms eager costs about
+5 ms on E2B and gives bit-equality.
 
-**Larger levers if the profile shows the matmuls near peak** (not drafted):
-the tower's 2430-row linears are the shape the W8A8 NAX kernel (story 2.3) is
-best at; a 140-soft-token budget (`--soft-tokens 140`) roughly halves the linears
-and quarters the attention, but changes what the model sees; or encode ahead of
-the decision.
+`tests/test_vision_fast.py` checks every stage on CPU against a tiny random
+tower. `tests/test_vision_mlx.py::test_vision_fast_is_bit_equal_to_the_vendored_path`
+pins it on the GPU with the real E2B weights.
 
-### To finish (GPU free; low power off: `sudo pmset -a lowpowermode 0`)
+## Measured (M5, AC power, low power mode **off** before and after every run; mlx 0.32.0)
 
-1. Profile both models, both paths, LM resident and not:
+### Profile (`proto/vision_profile.py`, 10 frames after one warm-up, median ms)
 
-   ```bash
-   python proto/vision_profile.py
-   python proto/vision_profile.py --tower-only
-   python proto/vision_profile.py --model mlx-community/gemma-4-26B-A4B-it-qat-4bit --int8
-   python proto/vision_profile.py --model mlx-community/gemma-4-26B-A4B-it-qat-4bit --tower-only
-   python proto/vision_profile.py --no-compile --path fast        # compile's share
-   python proto/vision_profile.py --dtype float16 --path both     # dtype check
-   ```
+Raw output is in `bench_runs/6-6/` (untracked). "LM" means the full runner is
+resident (26B with `--int8`, peak 19.6 GB), as in the bench. Staged rows are
+fenced with `mx.synchronize` after each stage. End-to-end rows are one graph.
 
-   Record each stage's share here, the TFLOP/s line, the two micro-benchmarks
-   and the parity line (`bit-equal n/n` or `max |d|`).
-2. If parity is bit-equal on both models (or within the 6.4 tolerances), flip
-   the default: `vision_fast: bool = True` in `MLXRunner`, and run the gates:
+| stage | E2B slow | E2B fast | 26B slow (LM) | 26B fast (LM) |
+|---|---|---|---|---|
+| preprocess (host) | 3.1 | 2.2 | 3.1 | 2.2 |
+| upload | 0.4 | 0.1 | 0.3 | 0.1 |
+| patch + position embed | 14.2 | 1.5 | 19.0 | 1.8 |
+| mask | 0.4 | — | 0.4 | — |
+| tower layers (uncompiled) | 175.2 | 170.7 | 636.8 | 624.3 |
+| pool (+ `.item()` sync on slow) | 0.9 | 0.5 | 1.2 | 0.8 |
+| projector | 0.3 | 0.3 | 0.5 | 0.5 |
+| merge (embeddings + per-layer ids + block ids) | 0.4 | 0.4 | 4.0 | 4.0 |
+| **end to end, one graph** | **193.2** | **138.1** (compiled) | **659.2** | **597.5** (compiled) |
+| tower TFLOP/s (matmul count) | 5.3 | 7.4 | 5.3 | 5.8 |
 
-   ```bash
-   pytest -m mlx tests/test_vision_mlx.py tests/test_vision_parity.py tests/test_battery_mlx.py
-   pytest tests/test_vision_fast.py
-   mlx-classifiers fixtures check fixtures/ --runner mlx   # image fixtures unchanged (6.5)
-   ```
+Tower-only runs (no LM resident) agree: E2B 194.4 → 137.7 ms, 26B 653.5 →
+590.2 ms. Fast path uncompiled: E2B 176.3 ms. Speed-up: **1.40x on E2B, 1.10x on
+the 26B**.
 
-   If it is not bit-equal, the two candidates are `mask=None` (the SDPA
-   micro-benchmark prints its own bit-equality) and compile (compare the parity
-   line of a `--no-compile` run); keep the one that differs off.
-3. Re-bench and compare the `encoder ms` column against 198 / 675 ms:
+Micro-benchmarks (best of 10):
 
-   ```bash
-   python -m mlx_classifiers.vision_bench
-   python -m mlx_classifiers.vision_bench --model mlx-community/gemma-4-26B-A4B-it-qat-4bit --int8
-   ```
+- position embedding, one-hot matmul vs gather: E2B 11.9 vs 0.9 ms, 26B 15.3 vs
+  1.2 ms; bit-equal.
+- SDPA for one layer, with the all-zero mask vs none: E2B 1.89 vs 1.60 ms, 26B
+  9.36 vs 8.90 ms; bit-equal.
 
-   If the 26B is not 3x faster, take the levers above in order. That is the
-   decision this story still has to make.
+**Where the 26B's time goes.** The fast 26B tower is two things.
+
+- Its linears: about 12 ms per layer, 327 ms in all. bf16 runs at 11 TFLOP/s on
+  the MLP shapes and 4.6 TFLOP/s on the 1152-square q/k/v/o.
+- SDPA at head_dim 72, padded to 80: **9.35 ms per layer, 252 ms in all, 3.4
+  TFLOP/s**. E2B's head_dim 64 runs at about 11 TFLOP/s.
+
+`[1, 16, 2430, d]` SDPA by padded width: d=72 unpadded 8.1 ms, 80 9.35 ms, 96
+8.3 ms, **128 5.2 ms**. None of these is bit-equal to 80; max |d| is 1e-3 per
+call. A manual matmul + softmax takes 19.2 ms.
+
+### Parity
+
+- `vision_fast` vs vendored, GPU, bit-equal on every frame: E2B 11/11 (LM and
+  tower-only), 26B 11/11 (LM and tower-only); max |d| 0.
+- `pytest -m mlx tests/test_vision_mlx.py tests/test_vision_parity.py
+  tests/test_battery_mlx.py` with `MLX_VLM_PYTHON` pointing at the mlx-vlm 0.7.8
+  venv: 13 passed. That includes 6.4 against mlx-vlm on E2B and the 26B, through
+  the default (fast) runner.
+- `mlx-classifiers fixtures check fixtures/ --runner mlx --logit-tol 0`: 11/11,
+  the image fixtures included, max |dp| 0, max |dlogit| 0.
+
+### Image bench before / after (`python -m mlx_classifiers.vision_bench [--vision-slow]`)
+
+| model | cell | encoder ms slow → fast | p50 ms slow → fast | decisions/s slow → fast |
+|---|---|---|---|---|
+| E2B stock | single new | 195 → 140 | 304 → 249 | 3.29 → 4.01 |
+| E2B stock | transcript delta, 6 frames | 197 → 141 | 289 → 233 | 3.45 → 4.28 |
+| 26B `--int8` | single new | 683, 811 → 723, 687 | 1266, 1518 → 1404, 1335 | 0.79, 0.66 → 0.71, 0.75 |
+| 26B `--int8` | transcript delta, 6 frames | 793, 810 → 754, 730 | 1311, 1336 → 1271, 1241 | 0.76, 0.75 → 0.79, 0.81 |
+
+E2B: no swap; peak 4.3 GB. The 26B was run twice per path (slow, fast, fast,
+slow). Swapping took 20k to 96k vm swapouts per run. "single same" never
+encodes, yet it moved 602 to 708 ms between runs, so in-bench 26B numbers carry
+±60 ms of swap noise. The encode gain there, 40 to 60 ms, is within that noise.
+The profile above is the clean 26B number.
+
+**Acceptance against the outline.** The profile criterion is met. The 3x target
+on the 26B is **not** met by bit-exact fixes: the tower is now mostly matmul
+plus a slow SDPA width. The 3x moves to story 6.7, chosen from the data below.
+
+### Data for the next lever (story 6.7)
+
+- **INT8 on the tower linears: rejected.** The repo's W8A8 kernel at tower
+  shapes (2430 rows) gave 26B q/k/v/o 1.41 → 1.12 ms, MLP gate/up 2.18 → 2.23 ms
+  (the down projection could not be quantized: 4304 is not a multiple of 64),
+  and E2B no better than bf16. bf16 already reaches 10 to 11 TFLOP/s on the MLP
+  shapes. Rel error is about 1e-2.
+- **SDPA width on the 26B**: pad 72 → 128 instead of 80 saves about 4.1 ms per
+  layer, about 110 ms per frame (598 → about 490 ms). It is not bit-exact
+  (1e-3 per call), so it needs the 6.4 tolerance gate rather than equality.
+- **A smaller soft-token budget** (fast path, tower only):
+
+  | budget | soft tokens | patches | E2B ms | 26B ms |
+  |---|---|---|---|---|
+  | 280 (today) | 270 | 2430 | 138 | 590 |
+  | 140 | 120 | 1080 | 59 | 236 |
+  | 70 | 63 | 567 | 31 | 105 |
+
+  140 is 2.5x on the 26B tower and also prefills about 150 fewer tokens per
+  frame. It changes what the model sees, so it needs regenerated image fixtures
+  and the gridworld battery's accuracy compared.
+- **Encode the next frame during the current decision**: one GPU, so this hides
+  latency only where the GPU would otherwise idle between decisions. It does not
+  raise decisions/s when decisions run back to back.
 
 ## Acceptance Criteria
 - **Given** the profile **when** recorded **then** each stage has a measured
-  share on both E2B and the 26B.
-- **Given** the fixes **when** the image bench reruns **then** encoder ms per
-  new frame drops by at least 3x on the 26B with image fixtures unchanged.
+  share on both E2B and the 26B (table above).
+- **Given** `vision_fast` (default) **when** compared to the vendored path on
+  the GPU **then** the soft tokens are bit-equal on E2B and the 26B, the 6.4
+  parity and the image fixtures pass unchanged (max |dlogit| 0), and encoder ms
+  per new frame drops (E2B 1.40x, 26B 1.10x by profile). *(test_vision_fast_is_bit_equal_to_the_vendored_path,
+  test_fast_compiled_equals_slow_bit_for_bit)*
+- The outline's "at least 3x on the 26B" is not reachable bit-exactly. It moves
+  to story 6.7.
