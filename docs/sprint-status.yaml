@@ -32,7 +32,7 @@ epics:
     title: Gemma 4 E2B INT8 runner on MLX
     status: in-progress
     story_home: docs/stories/
-    stories_count: 6
+    stories_count: 7
     stories:
       - id: "2.1"
         title: Recon — locate the E2B INT8 kernels and any vendored VLM internals
@@ -51,6 +51,9 @@ epics:
         status: in-progress
       - id: "2.6"
         title: INT8 attention router with proper Q-side length padding
+        status: pending
+      - id: "2.7"
+        title: Bounded-context mode — window the global layers with the rules prefix pinned as sinks
         status: pending
   - epic: 3
     title: Serving and calibration
