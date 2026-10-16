@@ -53,10 +53,14 @@ def question_options(question: QuestionT) -> tuple[str, ...]:
     return tuple(str(i) for i in range(len(question.criteria)))
 
 
-def option_labels(question: QuestionT) -> tuple[str, ...]:
-    """The label the model emits for each option: Yes/No, else letters A..Z."""
+def option_labels(question: QuestionT, readout: str = "first-token") -> tuple[str, ...]:
+    """The label the model emits for each option: Yes/No for ``noul``; otherwise
+    letters A..Z in first-token mode, or the option text itself (criteria key or
+    level) in sequence mode."""
     if isinstance(question, NoulQuestion):
         return NOUL_LABELS
+    if readout == "sequence":
+        return tuple(question.criteria)  # choice: the names; score: the levels
     n = len(question_options(question))
     if n > len(LETTER_LABELS):
         raise TooManyOptionsError(
@@ -80,10 +84,12 @@ def render_user_turn(
     question: QuestionT,
     labels: Sequence[str] | None = None,
     order: Sequence[int] | None = None,
+    readout: str = "first-token",
 ) -> str:
     """The user turn for one question. ``order`` lists option indices in display
-    order (default: declared order); ``labels[k]`` labels the k-th displayed option."""
-    labels = tuple(labels) if labels is not None else option_labels(question)
+    order (default: declared order); ``labels[k]`` labels the k-th displayed option.
+    In sequence mode options are bulleted and answered by their own text."""
+    labels = tuple(labels) if labels is not None else option_labels(question, readout)
     lines = ["State:", render_state(state), "", f"Question: {question.instructions}", ""]
     if isinstance(question, NoulQuestion):
         lines.append(f"Answer {labels[0]} or {labels[1]} only.")
@@ -100,6 +106,10 @@ def render_user_turn(
     order = tuple(order) if order is not None else tuple(range(len(entries)))
     if sorted(order) != list(range(len(entries))):
         raise PromptError(f"order {order} is not a permutation of {len(entries)} options")
+    if readout == "sequence":
+        lines.extend(f"- {entries[i]}" for i in order)
+        lines += ["", f"Answer with one {noun} exactly as written."]
+        return "\n".join(lines)
     lines.extend(f"{labels[k]}. {entries[i]}" for k, i in enumerate(order))
     lines += ["", f"Answer with the letter of one {noun} only."]
     return "\n".join(lines)
@@ -121,6 +131,7 @@ class CompiledPrompt:
     options: tuple[str, ...]
     labels: tuple[str, ...]
     order: tuple[int, ...]
+    readout: str = "first-token"
 
     @property
     def prefix_tokens(self) -> tuple[int, ...]:
@@ -137,15 +148,20 @@ def compile_question(
     template: ChatTemplate,
     tokenize: Tokenize,
     order: Sequence[int] | None = None,
+    readout: str | None = None,
 ) -> CompiledPrompt:
-    """Render and tokenize one question of ``request``."""
+    """Render and tokenize one question of ``request``. ``readout`` defaults to
+    ``request.options.readout``."""
     question = request.questions[name]
+    readout = readout or request.effective_options.readout
     options = question_options(question)
-    labels = option_labels(question)
+    labels = option_labels(question, readout)
     if isinstance(question, NoulQuestion):
         order = (0, 1)  # the Yes/No pair is fixed, never permuted
     order = tuple(order) if order is not None else tuple(range(len(options)))
-    user = render_user_turn(request.state, question, labels, order)
+    if readout == "sequence":  # labels are the option texts, so they follow the order
+        labels = tuple(labels[i] for i in order)
+    user = render_user_turn(request.state, question, labels, order, readout)
     chat = template.render(request.prefix, user)
     tokens = tuple(tokenize(chat.text))
     prefix_len = 0
@@ -169,13 +185,22 @@ def compile_question(
         options=options,
         labels=labels,
         order=order,
+        readout=readout,
     )
 
 
-def compile_request(request: SystemOneRequest, runner: Any) -> list[CompiledPrompt]:
+def compile_request(
+    request: SystemOneRequest, runner: Any, readout: str | None = None
+) -> list[CompiledPrompt]:
     """One :class:`CompiledPrompt` per question, in request order, via the runner's
     ``chat_template`` and ``tokenize``."""
     return [
-        compile_question(request, name, template=runner.chat_template, tokenize=runner.tokenize)
+        compile_question(
+            request,
+            name,
+            template=runner.chat_template,
+            tokenize=runner.tokenize,
+            readout=readout,
+        )
         for name in request.questions
     ]

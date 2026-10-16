@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import time
 
-from .answers import build_answer
+from .answers import build_answer, shape_answer
 from .prompt import compile_request
 from .readout import bind_options
 from .runner import Runner
-from .schema import SystemOneRequest, SystemOneResponse, Timing, Usage
+from .schema import Debug, SystemOneRequest, SystemOneResponse, Timing, Usage
+from .sequence import score_sequences
 
 __all__ = ["decide"]
 
@@ -29,14 +30,18 @@ def decide(
     ``usage.input_tokens`` sums the tokens each prefill computed (suffixes only
     when cached) and ``cached_tokens`` the prefix tokens each one reused; the
     one-off ``cache_prefix`` cost is not counted.
+
+    With ``options.readout = "sequence"`` each question's prompt (minus its last
+    token) is cached instead, and every option costs one small pass
+    (:mod:`mlx_classifiers.sequence`).
     """
     t0 = time.perf_counter()
     opts = request.effective_options
-    if opts.readout != "first-token":
-        raise NotImplementedError("sequence readout lands in story 1.6")
     if opts.permutations != 1:
         raise NotImplementedError("option-order permutation lands in story 1.7")
     applied = temperature if (opts.calibrated and temperature is not None) else 1.0
+    if opts.readout == "sequence":
+        return _decide_sequence(request, runner, applied, opts.debug, t0)
 
     prompts = compile_request(request, runner)
     bindings = [bind_options(p, runner.tokenize) for p in prompts]
@@ -71,4 +76,37 @@ def decide(
             readout=readout_s * 1e3,
             total=(time.perf_counter() - t0) * 1e3,
         ),
+    )
+
+
+def _decide_sequence(
+    request: SystemOneRequest, runner: Runner, temperature: float, debug: bool, t0: float
+) -> SystemOneResponse:
+    answers, input_tokens, cached_tokens = {}, 0, 0
+    prefill_s = 0.0
+    for prompt in compile_request(request, runner, readout="sequence"):
+        t1 = time.perf_counter()
+        scores = score_sequences(prompt, runner)
+        prefill_s += time.perf_counter() - t1
+        input_tokens += scores.input_tokens
+        cached_tokens += scores.cached_tokens
+        dbg = (
+            Debug(
+                readout_position=scores.readout_position,
+                option_token_ids=scores.option_token_ids,
+                raw_logits=dict(zip(scores.options, scores.scores, strict=True)),
+                temperature=temperature,
+            )
+            if debug
+            else None
+        )
+        answers[prompt.name] = shape_answer(
+            prompt, scores.options, list(scores.scores), temperature=temperature, debug=dbg
+        )
+    total = (time.perf_counter() - t0) * 1e3
+    return SystemOneResponse(
+        model=request.model or getattr(runner, "model_id", "default"),
+        answers=answers,
+        usage=Usage(input_tokens=input_tokens, output_tokens=0, cached_tokens=cached_tokens),
+        timing_ms=Timing(prefill=prefill_s * 1e3, readout=total - prefill_s * 1e3, total=total),
     )

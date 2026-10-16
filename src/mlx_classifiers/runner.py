@@ -29,6 +29,7 @@ Nothing here samples. The same tokens give the same logits.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import struct
 import zlib
@@ -195,10 +196,19 @@ class ToyTokenizer:
 class _FakeLogitRow:
     """A lazy vocab row: logit(token) computed on demand from the context digest."""
 
-    __slots__ = ("_bias", "_digest", "_fn", "_vocab")
+    __slots__ = ("_bias", "_digest", "_fn", "_lse", "_vocab")
 
     def __init__(self, digest: bytes, vocab: int, fn, bias: Mapping[int, float]):
         self._digest, self._vocab, self._fn, self._bias = digest, vocab, fn, bias
+        self._lse: float | None = None
+
+    def logsumexp(self) -> float:
+        """Log-normaliser over the whole vocab (computed once, then cached)."""
+        if self._lse is None:
+            values = [self[i] for i in range(self._vocab)]
+            m = max(values)
+            self._lse = m + math.log(math.fsum(math.exp(v - m) for v in values))
+        return self._lse
 
     def __len__(self) -> int:
         return self._vocab

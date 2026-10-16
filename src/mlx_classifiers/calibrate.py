@@ -17,12 +17,30 @@ __all__ = [
     "gather",
     "nll",
     "softmax",
+    "token_logprob",
 ]
 
 
 def gather(row, token_ids: Sequence[int]) -> list[float]:
     """The logits of ``token_ids`` from a vocab row (the option mask)."""
     return [float(row[t]) for t in token_ids]
+
+
+def token_logprob(row, token_id: int) -> float:
+    """``log softmax(row)[token_id]`` over the full vocab (sequence mode).
+
+    Uses ``row.logsumexp()`` when the row provides one (the FakeRunner's rows do;
+    a real runner should return rows with a vectorised one), else a Python pass
+    over the vocab.
+    """
+    lse = getattr(row, "logsumexp", None)
+    if lse is not None:
+        total = float(lse())
+    else:
+        values = [float(row[i]) for i in range(len(row))]
+        m = max(values)
+        total = m + math.log(math.fsum(math.exp(v - m) for v in values))
+    return float(row[token_id]) - total
 
 
 def softmax(logits: Sequence[float], temperature: float = 1.0) -> list[float]:

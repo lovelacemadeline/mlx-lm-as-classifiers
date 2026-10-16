@@ -24,7 +24,7 @@ epics:
         status: completed
       - id: "1.6"
         title: Sequence-scoring readout mode
-        status: pending
+        status: completed
       - id: "1.7"
         title: Order permutation for position-bias reduction
         status: pending
