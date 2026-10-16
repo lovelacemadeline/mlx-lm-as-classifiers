@@ -12,6 +12,10 @@ through this protocol, and the Swift + vision port mirrors it one-to-one:
     Prefill ``tokens`` once and keep the KV state, so later calls only prefill
     the suffix. Produces no logits.
 
+``chat_template``
+    A :class:`~mlx_classifiers.template.ChatTemplate` for the model's tokenizer
+    (rendering is text-only; ``tokenize`` turns it into ids).
+
 ``prefill(tokens, prefix_cache=None, readout_positions=None) -> Readout``
     Prefill the *full* sequence ``tokens``; when ``prefix_cache`` is given,
     ``tokens`` must start with ``prefix_cache.tokens`` and only the suffix is
@@ -31,6 +35,8 @@ import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+
+from .template import ChatTemplate, ToyChatTemplate
 
 __all__ = [
     "FakeRunner",
@@ -85,6 +91,9 @@ class Readout:
 
 class Runner(Protocol):
     """The model seam. See the module docstring for the contract."""
+
+    @property
+    def chat_template(self) -> ChatTemplate: ...
 
     def tokenize(self, text: str) -> list[int]: ...
 
@@ -220,6 +229,7 @@ class FakeRunner:
     """
 
     tokenizer: ToyTokenizer = field(default_factory=ToyTokenizer)
+    chat_template: ChatTemplate = field(default_factory=ToyChatTemplate)
     logit_bias: dict[int, float] = field(default_factory=dict)
     logit_fn: Callable[[bytes, int], float] = _default_logit
     projected_rows: int = 0

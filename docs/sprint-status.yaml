@@ -15,7 +15,7 @@ epics:
         status: completed
       - id: "1.3"
         title: Prompt compilation — chat template, prefix/state split, readout position
-        status: ready-for-dev
+        status: completed
       - id: "1.4"
         title: Option binding and prefix-tree first-token readout
         status: ready-for-dev
