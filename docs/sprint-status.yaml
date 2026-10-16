@@ -114,9 +114,9 @@ epics:
         status: completed
   - epic: 6
     title: Vision runner — image blocks in the state, vendored Gemma 4 vision path
-    status: completed
+    status: in-progress
     story_home: docs/stories/
-    stories_count: 5
+    stories_count: 6
     stories:
       - id: "6.1"
         title: Image blocks in the wire state and in prompt compilation
@@ -133,3 +133,6 @@ epics:
       - id: "6.5"
         title: Image fixtures and a battery slice with images
         status: completed
+      - id: "6.6"
+        title: Vision encoder speed — 675 ms per frame on the 26B is not the hardware
+        status: pending
