@@ -35,7 +35,7 @@ epics:
     title: Gemma 4 E2B INT8 runner on MLX
     status: in-progress
     story_home: docs/stories/
-    stories_count: 7
+    stories_count: 8
     stories:
       - id: "2.1"
         title: Recon — locate the E2B INT8 kernels and any vendored VLM internals
@@ -58,11 +58,14 @@ epics:
       - id: "2.7"
         title: Bounded-context mode — window the global layers with the rules prefix pinned as sinks
         status: pending
+      - id: "2.8"
+        title: MoE expert INT8 for the 26B — vendor the expert-GEMM path from the August repo
+        status: pending
   - epic: 3
     title: Serving and calibration
-    status: completed
+    status: in-progress
     story_home: docs/stories/
-    stories_count: 5
+    stories_count: 6
     stories:
       - id: "3.1"
         title: /v1/systemone route beside chat completions
@@ -79,6 +82,9 @@ epics:
       - id: "3.5"
         title: Chat route honours max_tokens and a per-call thinking toggle
         status: completed
+      - id: "3.6"
+        title: Delta cache fixed overhead — the 600 ms floor on the 26B
+        status: pending
   - epic: 4
     title: Golden fixtures for the Swift + vision port
     status: completed
