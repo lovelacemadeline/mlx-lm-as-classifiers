@@ -39,7 +39,7 @@ epics:
         status: completed
       - id: "2.2"
         title: MLX runner — load, cached prefix, prefill, readout-position slice
-        status: pending
+        status: completed
       - id: "2.3"
         title: INT8 kernel wiring into the runner
         status: pending

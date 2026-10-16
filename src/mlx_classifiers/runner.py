@@ -33,9 +33,9 @@ import math
 import re
 import struct
 import zlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 from .template import ChatTemplate, ToyChatTemplate
 
@@ -49,14 +49,48 @@ __all__ = [
 ]
 
 
-@runtime_checkable
-class LogitRow(Protocol):
-    """One vocab-sized row of logits. Anything indexable by token id works
-    (a list, a numpy row, an ``mx.array`` row); readout only gathers a few ids."""
+class LogitRow:
+    """One vocab-sized row of logits at a readout position; every Runner returns this.
 
-    def __getitem__(self, token_id: int, /) -> Any: ...
+    ``row[token_id]`` is a float logit; ``row.logsumexp()`` is the full-vocab
+    log-normaliser (sequence mode needs it), computed once on first use. The
+    backing store is the runner's business: the FakeRunner computes logits on
+    demand, the MLX runner wraps an ``mx.array``. Readout gathers only a few ids.
+    """
 
-    def __len__(self) -> int: ...
+    __slots__ = ("_lookup", "_lse", "_lse_fn", "_size")
+
+    def __init__(
+        self,
+        lookup: Callable[[int], float],
+        size: int,
+        logsumexp: Callable[[], float] | None = None,
+    ):
+        self._lookup, self._size, self._lse_fn = lookup, size, logsumexp
+        self._lse: float | None = None
+
+    def __len__(self) -> int:
+        return self._size
+
+    def __getitem__(self, token_id: int) -> float:
+        if not 0 <= token_id < self._size:
+            raise IndexError(token_id)
+        return float(self._lookup(token_id))
+
+    def logsumexp(self) -> float:
+        if self._lse is None:
+            if self._lse_fn is not None:
+                self._lse = float(self._lse_fn())
+            else:
+                values = [self[i] for i in range(self._size)]
+                m = max(values)
+                self._lse = m + math.log(math.fsum(math.exp(v - m) for v in values))
+        return self._lse
+
+    @classmethod
+    def from_list(cls, values: Sequence[float]) -> LogitRow:
+        values = list(values)
+        return cls(values.__getitem__, len(values))
 
 
 @dataclass(frozen=True)
@@ -193,32 +227,6 @@ class ToyTokenizer:
         return "".join(self._seen.get(i, f"<?{i}>") for i in ids)
 
 
-class _FakeLogitRow:
-    """A lazy vocab row: logit(token) computed on demand from the context digest."""
-
-    __slots__ = ("_bias", "_digest", "_fn", "_lse", "_vocab")
-
-    def __init__(self, digest: bytes, vocab: int, fn, bias: Mapping[int, float]):
-        self._digest, self._vocab, self._fn, self._bias = digest, vocab, fn, bias
-        self._lse: float | None = None
-
-    def logsumexp(self) -> float:
-        """Log-normaliser over the whole vocab (computed once, then cached)."""
-        if self._lse is None:
-            values = [self[i] for i in range(self._vocab)]
-            m = max(values)
-            self._lse = m + math.log(math.fsum(math.exp(v - m) for v in values))
-        return self._lse
-
-    def __len__(self) -> int:
-        return self._vocab
-
-    def __getitem__(self, token_id: int) -> float:
-        if not 0 <= token_id < self._vocab:
-            raise IndexError(token_id)
-        return self._fn(self._digest, token_id) + self._bias.get(token_id, 0.0)
-
-
 def _default_logit(digest: bytes, token_id: int) -> float:
     """Pseudo-random logit in [-4, 4), a pure function of (context, token)."""
     h = hashlib.blake2b(digest + struct.pack("<I", token_id), digest_size=8).digest()
@@ -250,6 +258,10 @@ class FakeRunner:
     def vocab_size(self) -> int:
         return self.tokenizer.vocab_size
 
+    def _lookup(self, digest: bytes) -> Callable[[int], float]:
+        fn, bias = self.logit_fn, self.logit_bias
+        return lambda token_id: fn(digest, token_id) + bias.get(token_id, 0.0)
+
     def tokenize(self, text: str) -> list[int]:
         return self.tokenizer.encode(text)
 
@@ -272,7 +284,7 @@ class FakeRunner:
             digest = hashlib.blake2b(
                 struct.pack(f"<{p + 1}I", *tokens[: p + 1]), digest_size=16
             ).digest()
-            rows.append(_FakeLogitRow(digest, self.vocab_size, self.logit_fn, self.logit_bias))
+            rows.append(LogitRow(self._lookup(digest), self.vocab_size))
             self.projected_rows += 1
         return Readout(
             positions=positions,

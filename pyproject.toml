@@ -27,6 +27,7 @@ packages = ["src/mlx_classifiers"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["mlx: loads real model weights and runs on the GPU (skipped if not cached)"]
 
 [tool.ruff]
 line-length = 100
