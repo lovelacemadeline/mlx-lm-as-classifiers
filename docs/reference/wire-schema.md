@@ -74,6 +74,10 @@ that ignores them is still Jev-compatible.
 - **expected_score** (x-local) is the probability-weighted mean index, for
   callers that want a continuous value from an ordinal scale.
 - **output_tokens** is always 0. Nothing is decoded.
+- **debug.permutation_spread** (x-local) is, per option, the max minus min
+  calibrated probability across the `options.permutations` orderings of a
+  `choice` question; present only when more than one ordering ran. `noul` and
+  `score` questions are never permuted (fixed Yes/No pair; ordered scale).
 
 ## Readout modes (ADR-0003)
 

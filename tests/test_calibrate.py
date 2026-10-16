@@ -178,8 +178,3 @@ def test_decide_calibrated_flag_and_debug():
     assert set(dc.debug.raw_logits) == {"billing", "technical", "sales"}
     assert dc.debug.readout_position > 0
     assert decide(_req(), FakeRunner()).answers["department"].debug is None
-
-
-def test_decide_rejects_unbuilt_modes():
-    with pytest.raises(NotImplementedError):
-        decide(_req(permutations=2), FakeRunner())

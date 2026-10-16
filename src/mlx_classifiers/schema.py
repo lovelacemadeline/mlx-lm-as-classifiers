@@ -109,6 +109,7 @@ class Debug(WireModel):
     option_token_ids: dict[str, list[int]] | None = None
     raw_logits: dict[str, float] | None = None
     temperature: float | None = None
+    permutation_spread: dict[str, float] | None = None
 
 
 class NoulAnswer(WireModel):

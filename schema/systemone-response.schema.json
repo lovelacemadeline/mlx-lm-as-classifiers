@@ -41,7 +41,9 @@
         "readout_position": { "type": "integer" },
         "option_token_ids": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "integer" } } },
         "raw_logits": { "type": "object", "additionalProperties": { "type": "number" } },
-        "temperature": { "type": "number" }
+        "temperature": { "type": "number" },
+        "permutation_spread": { "type": "object", "additionalProperties": { "type": "number" },
+          "description": "Per option, max minus min calibrated probability across the options.permutations orderings. Present only when permutations > 1." }
       }
     },
     "NoulAnswer": {

@@ -3,7 +3,7 @@
 epics:
   - epic: 1
     title: Schema and readout core (model-agnostic)
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 7
     stories:
@@ -27,7 +27,7 @@ epics:
         status: completed
       - id: "1.7"
         title: Order permutation for position-bias reduction
-        status: pending
+        status: completed
   - epic: 2
     title: Gemma 4 E2B INT8 runner on MLX
     status: in-progress
