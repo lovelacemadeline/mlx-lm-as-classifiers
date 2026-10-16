@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import copy
+import json
 from pathlib import Path
 
 import pytest
 from conftest import GEMMA, HF_HUB
 
 from mlx_classifiers import FakeRunner
+from mlx_classifiers.cli import main as cli_main
 from mlx_classifiers.fixtures import (
     FIXTURE_FORMAT,
+    RESULTS_FORMAT,
     SEED_CASES,
     FixtureCase,
     build_fixture,
+    check,
     generate,
     load_fixtures,
     run_case,
@@ -21,6 +26,20 @@ from mlx_classifiers.fixtures import (
 COMMITTED = Path(__file__).resolve().parent.parent / "fixtures"
 _SNAP = HF_HUB / f"models--{GEMMA.replace('/', '--')}" / "snapshots"
 _HAVE_GEMMA = any(_SNAP.glob("*/model.safetensors"))
+
+
+@pytest.fixture
+def fake_dir(tmp_path):
+    generate(tmp_path / "fx", FakeRunner())
+    return tmp_path / "fx"
+
+
+def _results(fixtures_dir: Path) -> dict:
+    """A port's results file built from the fixtures themselves (a perfect port)."""
+    cases = {fx["id"]: copy.deepcopy(fx["expected"]) for fx in load_fixtures(fixtures_dir)}
+    for r in cases.values():
+        r.get("error", {}).pop("message", None)  # ports need not match our wording
+    return {"format": RESULTS_FORMAT, "cases": cases}
 
 
 # --- 4.1: format and generator --------------------------------------------------------------
@@ -104,6 +123,102 @@ def test_committed_fixtures_are_the_seed_set_on_gemma():
     assert [fx["expected"]["error"]["type"] for fx in errors] == ["LabelTokenizationError"]
 
 
+# --- 4.2: checker ---------------------------------------------------------------------------
+
+
+def test_perfect_results_pass(fake_dir):
+    report = check(fake_dir, _results(fake_dir))
+    assert report.ok and len(report.cases) == len(SEED_CASES)
+    assert all(c.token_ids_equal and c.max_prob_distance in (None, 0.0) for c in report.cases)
+
+
+def test_in_process_callable_results(fake_dir):
+    runner = FakeRunner()
+    assert check(fake_dir, lambda fx: run_case(fx, runner)).ok
+
+
+def test_one_wrong_token_id_names_position_and_both_ids(fake_dir):
+    res = _results(fake_dir)
+    case = res["cases"]["noul-first-token"]
+    want = case["tokens"][7]
+    case["tokens"][7] = want + 1
+    report = check(fake_dir, res)
+    assert not report.ok
+    (bad,) = [c for c in report.cases if not c.ok]
+    assert bad.id == "noul-first-token" and not bad.token_ids_equal
+    assert bad.failures == [f"tokens[7]: expected token id {want}, got {want + 1}"]
+
+
+def test_wrong_option_token_id_is_named(fake_dir):
+    res = _results(fake_dir)
+    ids = res["cases"]["choice-first-token-object-state"]["option_token_ids"]
+    want = ids["technical"][0]
+    ids["technical"] = [99]
+    (bad,) = [c for c in check(fake_dir, res).cases if not c.ok]
+    assert f"option_token_ids['technical'][0]: expected token id {want}, got 99" in bad.failures
+
+
+def test_probability_tolerance(fake_dir):
+    res = _results(fake_dir)
+    probs = res["cases"]["score-first-token-no-prefix"]["raw_probabilities"]
+    probs["0"] += 5e-4
+    report = check(fake_dir, res)
+    assert report.ok
+    case = next(c for c in report.cases if c.id == "score-first-token-no-prefix")
+    assert case.max_prob_distance == pytest.approx(5e-4)
+    assert not check(fake_dir, res, prob_tol=1e-4).ok
+
+
+def test_logits_reported_and_gated_only_on_request(fake_dir):
+    res = _results(fake_dir)
+    res["cases"]["noul-sequence"]["raw_logits"]["yes"] += 0.5
+    assert check(fake_dir, res).ok
+    report = check(fake_dir, res, logit_tol=0.1)
+    (bad,) = [c for c in report.cases if not c.ok]
+    assert bad.max_logit_distance == pytest.approx(0.5) and "raw_logits" in bad.failures[0]
+
+
+def test_missing_case_wrong_answer_and_error_mismatch_fail(fake_dir):
+    res = _results(fake_dir)
+    del res["cases"]["noul-sequence"]
+    res["cases"]["noul-first-token"]["answer"] = "maybe"
+    err = res["cases"]["choice-first-token-multi-token-label-error"]
+    err["error"]["type"] = "TooManyOptionsError"
+    failed = {c.id: c.failures for c in check(fake_dir, res).cases if not c.ok}
+    assert failed["noul-sequence"] == ["no result for this case"]
+    assert any("answer: expected" in f for f in failed["noul-first-token"])
+    assert failed["choice-first-token-multi-token-label-error"] == [
+        "error.type: expected LabelTokenizationError, got TooManyOptionsError"
+    ]
+
+
+def test_port_that_answers_the_error_case_fails(fake_dir):
+    res = _results(fake_dir)
+    res["cases"]["choice-first-token-multi-token-label-error"].pop("error")
+    failed = {c.id: c.failures for c in check(fake_dir, res).cases if not c.ok}
+    assert failed == {"choice-first-token-multi-token-label-error": ["missing field 'error'"]}
+
+
+def test_cli_check_exit_codes(fake_dir, tmp_path, capsys):
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(_results(fake_dir)))
+    assert cli_main(["fixtures", "check", str(fake_dir), "--results", str(good)]) == 0
+    assert f"{len(SEED_CASES)}/{len(SEED_CASES)} cases passed" in capsys.readouterr().out
+    res = _results(fake_dir)
+    res["cases"]["noul-first-token"]["tokens"][3] = -1
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(res))
+    assert cli_main(["fixtures", "check", str(fake_dir), "--results", str(bad)]) == 1
+    out = capsys.readouterr().out
+    assert "FAIL  noul-first-token" in out and "tokens[3]: expected token id" in out
+
+
+def test_bare_mapping_results_and_format_guard(fake_dir):
+    assert check(fake_dir, _results(fake_dir)["cases"]).ok
+    with pytest.raises(ValueError, match="results format"):
+        check(fake_dir, {"format": "other/9", "cases": {}})
+
+
 # --- on the real model ----------------------------------------------------------------------
 
 needs_gemma = pytest.mark.skipif(not _HAVE_GEMMA, reason=f"{GEMMA} weights not in HF cache")
@@ -129,3 +244,11 @@ def test_generate_on_mlx_is_byte_identical(mlx_runner, tmp_path):
     regenerated = {fx["id"]: fx for fx in load_fixtures(tmp_path / "a")}
     for fx in load_fixtures(COMMITTED):
         assert regenerated[fx["id"]]["expected"]["tokens"] == fx["expected"]["tokens"]
+
+
+@pytest.mark.mlx
+@needs_gemma
+def test_committed_fixtures_reproduce_on_mlx(mlx_runner):
+    """The in-process checker mode (4.2): regenerate on MLXRunner and compare."""
+    report = check(COMMITTED, lambda fx: run_case(fx, mlx_runner))
+    assert report.ok, report.render()

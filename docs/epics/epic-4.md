@@ -1,6 +1,6 @@
 ---
 type: epic
-status: in-progress
+status: completed
 title: Golden fixtures for the Swift + vision port
 epic: 4
 owner: maddie
@@ -18,7 +18,7 @@ runner, and a checker that any port runs against them.
 | id | title | status |
 |---|---|---|
 | 4.1 | Fixture format and generator | completed |
-| 4.2 | Fixture checker usable from another repo | pending |
+| 4.2 | Fixture checker usable from another repo | completed |
 
 ## Related
 - ADR-0002

@@ -10,6 +10,13 @@ Generate (story 4.1)::
 
     mlx-classifiers fixtures generate fixtures/
 
+Check a port (story 4.2)::
+
+    mlx-classifiers fixtures check fixtures/ --results port-results.json
+    mlx-classifiers fixtures check fixtures/ --runner mlx      # regenerate + compare
+
+or, from another repo, ``mlx_classifiers.fixtures.check(fixtures_dir, results)``.
+
 Logits are pinned per *path*: naive ``model(all)[:, -1]`` and the split prefill
 differ by up to 0.75 in raw logits while agreeing on argmax (story 2.5), so a
 fixture records the split path and its cache boundary, and a port must follow it.
@@ -22,8 +29,8 @@ import hashlib
 import json
 import re
 import sys
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +43,14 @@ from .sequence import score_sequences
 
 __all__ = [
     "FIXTURE_FORMAT",
+    "RESULTS_FORMAT",
     "SEED_CASES",
+    "CaseReport",
+    "CheckReport",
     "FixtureCase",
     "build_fixture",
+    "check",
+    "compare",
     "generate",
     "load_fixtures",
     "model_provenance",
@@ -46,6 +58,8 @@ __all__ = [
 ]
 
 FIXTURE_FORMAT = "mlx-classifiers-fixture/1"
+RESULTS_FORMAT = "mlx-classifiers-results/1"
+DEFAULT_PROB_TOL = 1e-3
 
 Result = dict[str, Any]
 
@@ -333,6 +347,194 @@ def load_fixtures(directory: str | Path) -> list[dict[str, Any]]:
     return out
 
 
+# --- checking (story 4.2) -------------------------------------------------------------------
+
+
+@dataclass
+class CaseReport:
+    """One case's comparison. ``token_ids_equal`` covers the prompt tokens, the
+    readout position and the option token ids (all exact)."""
+
+    id: str
+    failures: list[str] = field(default_factory=list)
+    token_ids_equal: bool = True
+    max_prob_distance: float | None = None
+    max_logit_distance: float | None = None
+
+    @property
+    def ok(self) -> bool:
+        return not self.failures
+
+    def render(self) -> str:
+        dp = "-" if self.max_prob_distance is None else f"{self.max_prob_distance:.3g}"
+        dl = "-" if self.max_logit_distance is None else f"{self.max_logit_distance:.3g}"
+        tok = "exact" if self.token_ids_equal else "MISMATCH"
+        head = f"{'PASS' if self.ok else 'FAIL'}  {self.id}  token ids {tok}  max|dp| {dp}"
+        lines = [f"{head}  max|dlogit| {dl}"]
+        lines += [f"      - {f}" for f in self.failures]
+        return "\n".join(lines)
+
+
+@dataclass
+class CheckReport:
+    cases: list[CaseReport]
+
+    @property
+    def ok(self) -> bool:
+        return all(c.ok for c in self.cases)
+
+    def render(self) -> str:
+        passed = sum(c.ok for c in self.cases)
+        body = [c.render() for c in self.cases]
+        return "\n".join([*body, f"{passed}/{len(self.cases)} cases passed"])
+
+
+def _compare_ids(where: str, want: Sequence[int], got: Any, failures: list[str]) -> bool:
+    if not isinstance(got, list):
+        failures.append(f"{where}: expected a list of {len(want)} token ids, got {got!r}")
+        return False
+    ok = True
+    for i, (w, g) in enumerate(zip(want, got, strict=False)):
+        if w != g:
+            failures.append(f"{where}[{i}]: expected token id {w}, got {g}")
+            ok = False
+            break  # the first divergence; later ones usually follow from it
+    if len(want) != len(got):
+        failures.append(f"{where}: expected {len(want)} token ids, got {len(got)}")
+        ok = False
+    return ok
+
+
+def _max_distance(
+    where: str, want: Mapping[str, float], got: Any, failures: list[str]
+) -> tuple[float | None, str | None]:
+    if not isinstance(got, Mapping) or set(got) != set(want):
+        keys = sorted(got) if isinstance(got, Mapping) else got
+        failures.append(f"{where}: expected options {sorted(want)}, got {keys}")
+        return None, None
+    worst = max(want, key=lambda o: abs(float(got[o]) - want[o]))
+    return abs(float(got[worst]) - want[worst]), worst
+
+
+def compare(
+    expected: Mapping[str, Any],
+    result: Mapping[str, Any] | None,
+    *,
+    case_id: str = "?",
+    prob_tol: float = DEFAULT_PROB_TOL,
+    logit_tol: float | None = None,
+) -> CaseReport:
+    """Compare one result block against a fixture's ``expected`` block.
+
+    Exact: ``tokens``, ``prefix_len``, ``readout_position``, ``options``,
+    ``labels``, ``option_token_ids``, ``answer``, ``error.type``. Within
+    ``prob_tol`` (max absolute difference): ``raw_probabilities``. ``raw_logits``
+    distance is reported, and fails only when ``logit_tol`` is given.
+    """
+    rep = CaseReport(case_id)
+    f = rep.failures
+    if result is None:
+        f.append("no result for this case")
+        rep.token_ids_equal = False
+        return rep
+    for key in expected:
+        if key not in result:
+            f.append(f"missing field {key!r}")
+    if "error" in result and "error" not in expected:
+        f.append(f"unexpected error {result['error']!r}")
+
+    tok_ok = True
+    if "tokens" in result:
+        tok_ok &= _compare_ids("tokens", expected["tokens"], result["tokens"], f)
+    for key in ("prefix_len", "readout_position"):
+        if key in result and result[key] != expected[key]:
+            f.append(f"{key}: expected {expected[key]}, got {result[key]}")
+            tok_ok &= key != "readout_position"
+    for key in ("options", "labels"):
+        if key in result and list(result[key]) != list(expected[key]):
+            f.append(f"{key}: expected {expected[key]}, got {result[key]}")
+    if isinstance(result.get("option_token_ids"), Mapping):
+        got_ids = result["option_token_ids"]
+        for o, want in expected["option_token_ids"].items():
+            if o not in got_ids:
+                f.append(f"option_token_ids: no ids for option {o!r}")
+                tok_ok = False
+            else:
+                tok_ok &= _compare_ids(f"option_token_ids[{o!r}]", want, got_ids[o], f)
+    elif "option_token_ids" in result:
+        f.append(f"option_token_ids: expected an object, got {result['option_token_ids']!r}")
+        tok_ok = False
+    rep.token_ids_equal = tok_ok and "tokens" in result and "option_token_ids" in result
+
+    if "error" in expected:
+        got = result.get("error")
+        want_type = expected["error"]["type"]
+        got_type = got.get("type") if isinstance(got, Mapping) else None
+        if got is not None and got_type != want_type:
+            f.append(f"error.type: expected {want_type}, got {got_type}")
+        return rep
+
+    if "raw_probabilities" in result:
+        want, got = expected["raw_probabilities"], result["raw_probabilities"]
+        d, o = _max_distance("raw_probabilities", want, got, f)
+        rep.max_prob_distance = d
+        if d is not None and not d <= prob_tol:
+            f.append(f"raw_probabilities: max distance {d:.3g} at {o!r} exceeds {prob_tol:g}")
+    if "raw_logits" in result:
+        d, o = _max_distance("raw_logits", expected["raw_logits"], result["raw_logits"], f)
+        rep.max_logit_distance = d
+        if d is not None and logit_tol is not None and not d <= logit_tol:
+            f.append(f"raw_logits: max distance {d:.3g} at {o!r} exceeds {logit_tol:g}")
+    if "answer" in result and result["answer"] != expected["answer"]:
+        f.append(f"answer: expected {expected['answer']!r}, got {result['answer']!r}")
+    return rep
+
+
+ResultsSource = str | Path | Mapping[str, Any] | Callable[[dict[str, Any]], Result]
+
+
+def _results_lookup(results: ResultsSource) -> Callable[[dict[str, Any]], Result | None]:
+    if callable(results):
+        return results
+    if isinstance(results, str | Path):
+        results = json.loads(Path(results).read_text(encoding="utf-8"))
+    if "format" in results:
+        if results["format"] != RESULTS_FORMAT:
+            raise ValueError(f"results format {results['format']!r}, expected {RESULTS_FORMAT!r}")
+        results = results["cases"]
+    return lambda fx: results.get(fx["id"])
+
+
+def check(
+    fixtures: str | Path | Sequence[Mapping[str, Any]],
+    results: ResultsSource,
+    *,
+    prob_tol: float = DEFAULT_PROB_TOL,
+    logit_tol: float | None = None,
+) -> CheckReport:
+    """Check a port's results against fixtures.
+
+    ``fixtures`` is a directory or a list of loaded fixture dicts. ``results`` is
+    a results JSON path, its parsed object (``{"format", "cases": {id: result}}``
+    or a bare ``{id: result}``), or a callable ``fixture -> result`` (run the
+    port in process). A result has the shape of the fixture's ``expected`` block.
+    """
+    fxs = load_fixtures(fixtures) if isinstance(fixtures, str | Path) else list(fixtures)
+    lookup = _results_lookup(results)
+    reports = []
+    for fx in fxs:
+        reports.append(
+            compare(
+                fx["expected"],
+                lookup(fx),
+                case_id=fx["id"],
+                prob_tol=prob_tol,
+                logit_tol=logit_tol,
+            )
+        )
+    return CheckReport(reports)
+
+
 # --- CLI ------------------------------------------------------------------------------------
 
 
@@ -344,6 +546,15 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     g.add_argument("out_dir", type=Path)
     g.add_argument("--model", default=DEFAULT_MODEL)
     g.set_defaults(func=_cmd_generate)
+    c = sub.add_parser("check", help="compare a port's results with the fixtures (story 4.2)")
+    c.add_argument("fixtures_dir", type=Path)
+    src = c.add_mutually_exclusive_group(required=True)
+    src.add_argument("--results", type=Path, help="results JSON written by the port")
+    src.add_argument("--runner", choices=["mlx"], help="regenerate in process and compare")
+    c.add_argument("--model", default=None, help="with --runner mlx (default: the fixtures')")
+    c.add_argument("--prob-tol", type=float, default=DEFAULT_PROB_TOL)
+    c.add_argument("--logit-tol", type=float, default=None, help="also gate raw logits")
+    c.set_defaults(func=_cmd_check)
 
 
 def _load_runner(repo: str) -> Any:
@@ -356,6 +567,18 @@ def _cmd_generate(args: argparse.Namespace) -> int:
     paths = generate(args.out_dir, _load_runner(args.model))
     print(f"wrote {len(paths)} fixtures to {args.out_dir}")
     return 0
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    fxs = load_fixtures(args.fixtures_dir)
+    if args.runner == "mlx":
+        runner = _load_runner(args.model or fxs[0]["model"]["repo"])
+        results: ResultsSource = lambda fx: run_case(fx, runner)
+    else:
+        results = args.results
+    report = check(fxs, results, prob_tol=args.prob_tol, logit_tol=args.logit_tol)
+    print(report.render())
+    return 0 if report.ok else 1
 
 
 def main(args: argparse.Namespace) -> int:
