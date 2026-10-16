@@ -35,7 +35,7 @@ epics:
     title: Gemma 4 E2B INT8 runner on MLX
     status: in-progress
     story_home: docs/stories/
-    stories_count: 8
+    stories_count: 9
     stories:
       - id: "2.1"
         title: Recon — locate the E2B INT8 kernels and any vendored VLM internals
@@ -61,6 +61,9 @@ epics:
       - id: "2.8"
         title: MoE expert INT8 for the 26B — vendor the W4A8 expert gather-GEMM (ling3-mlx kernel, int8-mlx affine fold)
         status: completed
+      - id: "2.9"
+        title: Memory budget — stop keeping two copies of INT8-patched weights, then quantise the KV store
+        status: pending
   - epic: 3
     title: Serving and calibration
     status: completed
