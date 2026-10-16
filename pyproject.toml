@@ -14,6 +14,9 @@ dependencies = [
 # The MLX runner is optional so the schema/readout core stays importable
 # (and testable) on machines without Apple silicon. Pin decided in Epic 2.
 mlx = ["mlx-lm>=0.31.3"]
+# Image blocks (Epic 6): the vendored Gemma 4 vision path needs Pillow to decode
+# and resize PNGs. No mlx-vlm at runtime.
+vision = ["mlx-lm>=0.31.3", "pillow>=10.3"]
 server = ["litestar>=2.12", "uvicorn>=0.30"]
 dev = ["pytest>=8", "pytest-cov", "ruff"]
 

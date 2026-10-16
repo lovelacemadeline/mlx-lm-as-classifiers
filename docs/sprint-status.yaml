@@ -120,7 +120,7 @@ epics:
         status: completed
       - id: "6.2"
         title: Vendor the Gemma 4 vision encoder, projector and merge with provenance
-        status: pending
+        status: completed
       - id: "6.3"
         title: MLXRunner image path — encode, merge embeddings, same split prefill
         status: pending

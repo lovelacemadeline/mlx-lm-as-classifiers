@@ -23,7 +23,7 @@ non-standard ops are checked first; the dependency is the documented fallback.
 | id | title | status |
 |---|---|---|
 | 6.1 | Image blocks in the wire state and in prompt compilation | completed |
-| 6.2 | Vendor the Gemma 4 vision encoder, projector and merge with provenance | pending |
+| 6.2 | Vendor the Gemma 4 vision encoder, projector and merge with provenance | completed |
 | 6.3 | MLXRunner image path — encode, merge embeddings, same split prefill | pending |
 | 6.4 | Parity test against mlx-vlm as a dev-only reference | pending |
 | 6.5 | Image fixtures and a battery slice with images | pending |
