@@ -26,7 +26,7 @@ KV-consumer layers, so the readout must run them on the readout row only
 | 2.2 | MLX runner — load, cached prefix, prefill, readout-position slice | pending |
 | 2.3 | INT8 kernel wiring into the runner | pending |
 | 2.4 | Decisions-per-second benchmark harness | pending |
-| 2.5 | KV-consumer layers run on the readout row only | ready-for-dev |
+| 2.5 | KV-consumer layers run on the readout row only | in-progress |
 | 2.6 | INT8 attention router with proper Q-side length padding | pending |
 
 ## Related

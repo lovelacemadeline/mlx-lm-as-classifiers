@@ -48,7 +48,7 @@ epics:
         status: pending
       - id: "2.5"
         title: KV-consumer layers run on the readout row only
-        status: ready-for-dev
+        status: in-progress
       - id: "2.6"
         title: INT8 attention router with proper Q-side length padding
         status: pending
