@@ -274,6 +274,8 @@ def test_image_fixtures_pin_the_sha256_of_their_png_bytes():
     assert {fx["id"] for fx in fxs} == {
         "choice-first-token-image-colour",
         "choice-first-token-image-gridworld",
+        "choice-first-token-image-gridworld-vt140",
+        "choice-first-token-image-gridworld-vt70",
         "noul-sequence-image",
     }
     for fx in fxs:

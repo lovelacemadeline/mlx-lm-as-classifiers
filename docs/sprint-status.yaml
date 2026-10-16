@@ -137,5 +137,8 @@ epics:
         title: Vision encoder speed — 675 ms per frame on the 26B is not the hardware
         status: completed
       - id: "6.7"
-        title: Vision encoder 3x on the 26B — token budget and SDPA width, under the 6.4 tolerances
+        title: Vision soft-token budget — 70 / 140 / 280 per request, gated on the battery and the loop
+        status: completed
+      - id: "6.8"
+        title: Vision encoder SDPA width 128 on the 26B, under the 6.4 tolerances
         status: pending

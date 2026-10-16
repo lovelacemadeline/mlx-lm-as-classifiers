@@ -54,7 +54,7 @@ One JSON object per file, named `<id>.json`:
 | `options` | string[]: option names in declared order (`["yes","no"]` for noul, `"0".."n-1"` for score) | exact |
 | `labels` | string[]: the label shown for each option (`Yes`/`No`, `A`.., or the option text in sequence mode) | exact |
 | `option_token_ids` | {option: int[]}: each label tokenized *in context* (after the prompt text) | exact |
-| `images` | [{start, length, sha256}]: image cases only. Each image's run of soft-token ids in `tokens` (Gemma 4: `tokens[start-1]` is boi 255999, `length` x 258880, then eoi 258882) and the sha256 of its PNG bytes | exact |
+| `images` | [{start, length, sha256}]: image cases only. Each image's run of soft-token ids in `tokens` (Gemma 4: `tokens[start-1]` is boi 255999, `length` x 258880, then eoi 258882) and the sha256 of its PNG bytes. A case run at a non-default soft-token budget (`options.vision_soft_tokens` 70 or 140, story [6.7](../stories/6-7-vision-soft-token-budget.md)) also records `max_soft_tokens`; at the default 280 the key is absent | exact |
 | `raw_logits` | {option: float}: first-token, the logit at the option's mask id; sequence, the length-normalised loglikelihood | reported; gated only with `--logit-tol` |
 | `raw_probabilities` | {option: float}: softmax of `raw_logits` at T = 1 | max abs distance within `--prob-tol` (default 1e-3) |
 | `answer` | string: the option with the highest raw probability (first wins ties) | exact |
@@ -125,11 +125,17 @@ identical logits, but the cache boundary is recorded so a port can follow it.
 
 ## The seed set
 
-Eleven cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`). Three
+Thirteen cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`). Five
 carry images (story [6.5](../stories/6-5-image-fixtures-and-battery.md)):
 a colour question on a blue square from a cached prefix, the gridworld's
 action question on frame `gw-s3-t00` (`battery/images/`) given only as an
-image, and a sequence-mode Yes/No on the square. The other eight: noul, choice
+image, and a sequence-mode Yes/No on the square. Two more repeat the gridworld
+case at the non-default soft-token budgets (`-vt140`: 120 soft tokens from a
+480 x 576 resize; `-vt70`: 63 from 336 x 432; story
+[6.7](../stories/6-7-vision-soft-token-budget.md)); the budget is in
+the request's `options.vision_soft_tokens` and in `expected.images`. A port
+resizes to the budget (at most budget x 9 patches of 16 px, sides multiples of
+48) and pools 3 x 3, exactly as at 280. The other eight: noul, choice
 and score in both readout modes; a prefix-cached case; states as a string, a
 JSON object and a list; a case with no system turn; sequence options of more
 than one token; and `choice-first-token-multi-token-label-error`, which runs

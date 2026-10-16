@@ -1,0 +1,104 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "choice-first-token-image-gridworld-vt70",
+  "description": "the gridworld frame case at a 70 soft-token budget (63 tokens; story 6.7)",
+  "model": {
+    "repo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "revision": "42f62737af7a9fd8c1d55d79666c1a217be4e2e2",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "first-token",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": [
+      "The picture is the map, north up: you are the blue square, the goal is the green cell, monsters are red cells (white pips are their hp), walls are dark grey and floor is light. The dark strip under the map shows your hp, the tick and your last action.",
+      {
+        "type": "image/png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAKAAAADACAIAAAAMWf8gAAACxElEQVR4nO3dsWpTYRiA4UR6CY4ZOjqkUKg4d3JyEofiZYj0Ijp4GdJBvAAnZ1EQkkGcRbwKcXOwGTxiSM77P8904BzIKS8fJfl60uXl5ZPFFLevX026nsO6d+DXZ88EjhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM47mQxmKvnLxZzNnUfb4LjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOO5k7s/7Tt3v3h7Zz7vv/bQJjhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM4TuC44Z4PHm0/bYLjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOG72++Cp+9Rvj59Ouv7l/dPFnPfNJjhu0MAXm83FZnP3uGfQwOOY/e/gf/Pp7GzncY8JjhM4TuA4geMEjhM4TuA4geMEjhM4TuC45Y/vXxdzNnW/u3r3dtbP+05lguMigcfZ7w4amPg+eJz97lQmOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHj9r4PfvbhetL1bx7d7O1eRmSC4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhu9s8HH9vzu1dHdj8mOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjZr8Pnvu+dt9McJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHDbcPHo0JjhM4TuC4yP8PHtPl9e75fH/z8/exCY4TOE7gOIHjBI4TOE7gOJ9Fx5ngOIHjBI5brlanh74H9sgEj7FN+rh+sPP0w+2Xoz3L3zDBcQLHCRwncJzAcQLHCRznk6w4ExwncJzAcQLHCRwncJzAY+yDt9vPf5xYr88PcT/8ZyZ4pMDr9bnBjTHBcQLHCRwncJzAI33Lzt13w8ydCY7zFx1xJjhO4DiBF22/ABGiZzunTXNxAAAAAElFTkSuQmCC"
+      }
+    ],
+    "questions": {
+      "q": {
+        "type": "choice",
+        "instructions": "Which action next?",
+        "criteria": {
+          "north": "Move up one cell (y - 1).",
+          "south": "Move down one cell (y + 1).",
+          "east": "Move right one cell (x + 1).",
+          "west": "Move left one cell (x - 1).",
+          "attack": "Hit one adjacent monster for 1 damage.",
+          "wait": "Stay in place for one tick."
+        }
+      }
+    },
+    "prefix": "You are playing a turn-based grid game. Each turn you see the map and a status line, and you choose exactly one action. Reach the goal G without dying; monsters M that are next to you hit you every turn.",
+    "options": {
+      "vision_soft_tokens": 70
+    }
+  },
+  "expected": {
+    "tokens": [2, 105, 9731, 107, 3048, 659, 5662, 496, 2490, 236772, 5140, 8411, 2290, 236761, 7714, 2490, 611, 1460, 506, 4187, 532, 496, 4981, 1757, 236764, 532, 611, 5347, 7121, 886, 2970, 236761, 76217, 506, 5671, 667, 2180, 26328, 236793, 47525, 587, 600, 659, 2148, 531, 611, 5524, 611, 1418, 2490, 236761, 106, 107, 105, 2364, 107, 3112, 236787, 107, 236840, 236770, 236842, 669, 6083, 563, 506, 4187, 236764, 8339, 872, 236787, 611, 659, 506, 3730, 6281, 236764, 506, 5671, 563, 506, 3826, 2145, 236764, 47525, 659, 2604, 3874, 568, 7986, 510, 3290, 659, 910, 30440, 779, 11595, 659, 4996, 13501, 532, 6413, 563, 2214, 236761, 669, 4996, 13356, 1208, 506, 4187, 3831, 822, 30440, 236764, 506, 7202, 532, 822, 1774, 2970, 236761, 108, 236840, 236778, 236842, 236743, 255999, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258882, 108, 14977, 236787, 15311, 2970, 2148, 236881, 108, 8755, 236787, 107, 236776, 236761, 8339, 236787, 19044, 872, 886, 2145, 568, 236762, 753, 236743, 236770, 769, 107, 236799, 236761, 8710, 236787, 19044, 1679, 886, 2145, 568, 236762, 900, 236743, 236770, 769, 107, 236780, 236761, 13512, 236787, 19044, 1447, 886, 2145, 568, 236781, 900, 236743, 236770, 769, 107, 236796, 236761, 11895, 236787, 19044, 2378, 886, 2145, 568, 236781, 753, 236743, 236770, 769, 107, 236788, 236761, 4657, 236787, 23881, 886, 18191, 27321, 573, 236743, 236770, 7112, 236761, 107, 236811, 236761, 4491, 236787, 29365, 528, 1977, 573, 886, 7202, 236761, 108, 7925, 607, 506, 6064, 529, 886, 5086, 1186, 236761, 106, 107, 105, 4368, 107],
+    "prefix_len": 53,
+    "readout_position": 302,
+    "options": [
+      "north",
+      "south",
+      "east",
+      "west",
+      "attack",
+      "wait"
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F"
+    ],
+    "images": [
+      {
+        "start": 128,
+        "length": 63,
+        "sha256": "9e34f3a858739053635b0fc0355316f707130966d16833eba6652e6a99ac3e6d",
+        "max_soft_tokens": 70
+      }
+    ],
+    "option_token_ids": {
+      "north": [236776],
+      "south": [236799],
+      "east": [236780],
+      "west": [236796],
+      "attack": [236788],
+      "wait": [236811]
+    },
+    "raw_logits": {
+      "north": 21.125,
+      "south": 20.375,
+      "east": 19.5,
+      "west": 20.125,
+      "attack": 19.25,
+      "wait": 16.5
+    },
+    "raw_probabilities": {
+      "north": 0.45448011455966675,
+      "south": 0.21468120500389123,
+      "east": 0.08949244070493802,
+      "west": 0.1671938905677433,
+      "attack": 0.069696782899977,
+      "wait": 0.004455566263783758
+    },
+    "answer": "north"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

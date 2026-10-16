@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import string
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .errors import PromptError, TooManyOptionsError
@@ -218,6 +218,9 @@ def compile_question(
     if request.has_images:
         if image_tokens is None:
             raise PromptError("the state holds image blocks but this runner has no vision path")
+        budget = request.effective_options.vision_soft_tokens
+        if budget is not None and budget != image_tokens.max_soft_tokens:
+            image_tokens = replace(image_tokens, max_soft_tokens=budget)  # story 6.7
         pngs = [decode_png_base64(b.base64) for b in request.state if isinstance(b, ImageBlock)]
         image = lambda k, block: _IMAGE_SENTINEL.format(k)
     user = render_user_turn(request.state, question, labels, order, readout, label_style, image)
@@ -274,7 +277,7 @@ def _image_slots(
             raise PromptError(
                 f"image run at {start} has {length} tokens, expected {spec.soft_tokens(png)}"
             )
-        slots.append(ImageSlot.from_png(start, length, png))
+        slots.append(ImageSlot.from_png(start, length, png, spec.max_soft_tokens))
     return tuple(slots)
 
 

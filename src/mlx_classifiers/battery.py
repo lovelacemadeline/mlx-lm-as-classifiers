@@ -443,6 +443,8 @@ def render_markdown(report: BatteryReport) -> str:
             f"temperatures: {cfg['temperatures'] or 'none'}"
         ),
     ]
+    if "vision_soft_tokens" in cfg:
+        lines.append(f"- int8: {cfg.get('int8')}  vision_soft_tokens: {cfg['vision_soft_tokens']}")
     if "lowpowermode" in env:
         lines.append(f"- power: `{env['lowpowermode']}`; {env.get('power_source', '')}")
         lines.append(f"- machine: {env.get('machine')}  timestamp: {env.get('timestamp')}")
@@ -534,25 +536,41 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--calibration", type=Path, default=None, help="calibration config for calibrated ECE"
     )
+    p.add_argument("--int8", action="store_true", help="W8A8 kernels (--runner mlx, M5)")
+    p.add_argument(
+        "--vision-tokens",
+        type=int,
+        choices=(70, 140, 280),
+        default=None,
+        help="soft-token budget per image (story 6.7; default: the checkpoint's 280)",
+    )
     p.add_argument("--out", type=Path, default=Path("bench_runs"))
     p.set_defaults(func=main)
 
 
-def _load_runner(kind: str, model: str) -> Any:
+def _load_runner(
+    kind: str, model: str, int8: bool = False, vision_tokens: int | None = None
+) -> Any:
     if kind == "fake":
+        from dataclasses import replace
+
         from .runner import FakeRunner
 
-        return FakeRunner()
+        runner = FakeRunner()
+        if vision_tokens is not None:
+            runner.image_tokens = replace(runner.image_tokens, max_soft_tokens=vision_tokens)
+        return runner
     from .mlx_runner import MLXRunner
 
-    return MLXRunner.load(model)
+    return MLXRunner.load(model, int8=int8, vision_soft_tokens=vision_tokens)
 
 
 def main(args: argparse.Namespace) -> int:
     from .bench import environment
 
     cases = load_battery(args.battery)
-    runner = _load_runner(args.runner, args.model)
+    int8, vision_tokens = getattr(args, "int8", False), getattr(args, "vision_tokens", None)
+    runner = _load_runner(args.runner, args.model, int8, vision_tokens)
     model = getattr(runner, "model_id", args.model)
     temperatures: dict[str, float] = {}
     if args.calibration is not None:
@@ -573,6 +591,8 @@ def main(args: argparse.Namespace) -> int:
             "battery": str(args.battery),
             "runner": args.runner,
             "calibration": str(args.calibration) if args.calibration else None,
+            "int8": int8,
+            "vision_soft_tokens": vision_tokens or 280,
         },
     )
     md, js = write_report(report, args.out)

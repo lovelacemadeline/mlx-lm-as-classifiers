@@ -90,6 +90,15 @@ class RequestOptions(ClosedModel):
     label_style: Literal["letters", "option-text"] = "letters"
     delta_cache: bool = True
     debug: bool = False
+    # Story 6.7. Not nullable: omit it for the runner's own budget.
+    vision_soft_tokens: Literal[70, 140, 280] = Field(
+        default=None,
+        description=(
+            "Soft-token budget per image (Gemma 4: at most budget x 9 patches, pooled 3 x 3 "
+            "to at most budget tokens). Omit for the runner's budget (280 unless the "
+            "server was started with another)."
+        ),
+    )
 
 
 class SystemOneRequest(ClosedModel):

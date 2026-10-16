@@ -28,7 +28,8 @@ non-standard ops are checked first; the dependency is the documented fallback.
 | 6.4 | Parity test against mlx-vlm as a dev-only reference | completed |
 | 6.5 | Image fixtures and a battery slice with images | completed |
 | 6.6 | Vision encoder speed — 675 ms per frame on the 26B is not the hardware | completed |
-| 6.7 | Vision encoder 3x on the 26B — token budget and SDPA width, under the 6.4 tolerances | pending |
+| 6.7 | Vision soft-token budget — 70 / 140 / 280 per request, gated on the battery and the loop | completed |
+| 6.8 | Vision encoder SDPA width 128 on the 26B, under the 6.4 tolerances | pending |
 
 ## Related
 - ADR-0002; [gridworld local-extensions](https://github.com/lovelacemadeline/systemone-gridworld/blob/main/schema/local-extensions.md) proposes the image-block shape (`{"type": "image/png", "base64": ...}` in the state list)

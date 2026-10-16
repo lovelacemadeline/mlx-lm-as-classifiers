@@ -158,6 +158,7 @@ def render_markdown(env: dict[str, Any], rows: list[VisionRow]) -> str:
         (
             f"- model: `{env['model']}`  git: `{env['git_rev']}`  int8: {env.get('int8')}"
             f"  vision_fast: {env.get('vision_fast')}"
+            f"  vision_soft_tokens: {env.get('vision_soft_tokens', 280)}"
         ),
         f"- machine: {env['machine']} ({env['platform']})",
         f"- power: `{env['lowpowermode']}`; {env['power_source']}",
@@ -205,13 +206,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--vision-slow", action="store_true", help="the vendored encode path (story 6.6 reference)"
     )
+    p.add_argument(
+        "--vision-tokens",
+        type=int,
+        choices=(70, 140, 280),
+        default=None,
+        help="soft-token budget per image (story 6.7; default: the checkpoint's 280)",
+    )
     p.add_argument("--battery", type=Path, default=BATTERY)
     p.add_argument("--out", type=Path, default=Path("bench_runs"))
     args = p.parse_args(argv)
     runner = MLXRunner.load(
-        args.model, int8=args.int8, vision=True, vision_fast=not args.vision_slow
+        args.model,
+        int8=args.int8,
+        vision=True,
+        vision_fast=not args.vision_slow,
+        vision_soft_tokens=args.vision_tokens,
     )
-    env = environment(args.model) | {"int8": args.int8, "vision_fast": not args.vision_slow}
+    env = environment(args.model) | {
+        "int8": args.int8,
+        "vision_fast": not args.vision_slow,
+        "vision_soft_tokens": runner.image_tokens.max_soft_tokens,
+    }
     import mlx.core as mx
 
     env["swapouts_before"] = _swapouts()

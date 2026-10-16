@@ -140,6 +140,22 @@ A runner without a vision path, a payload that is not a PNG, or a state text
 containing the placeholder token itself is a compile error. Requests without
 image blocks compile exactly as before.
 
+### Soft-token budget (x-local, story [6.7](../stories/6-7-vision-soft-token-budget.md))
+
+`options.vision_soft_tokens` (70, 140 or 280; omit for the runner's budget,
+280 unless the server runs `serve --vision-tokens N`) sets how many soft tokens
+an image may become. Gemma 4 resizes the image, aspect kept, to at most
+budget x 9 patches of 16 px (sides multiples of 48) and pools them 3 x 3, so N
+is at most the budget. A 160 x 192 frame: 270 tokens from 2430 patches at 280,
+120 from 1080 at 140, 63 from 567 at 70. The vision tower runs over the
+patches, so its cost falls faster than N (attention is quadratic in the patch
+count), and the prompt is shorter by the difference in N. The same PNG at two
+budgets is two different images to the delta cache.
+
+```json
+{ "options": { "vision_soft_tokens": 140 } }
+```
+
 ## Versioning
 
 The schema `$id` carries `/v1/`. Additive x-local fields do not bump the

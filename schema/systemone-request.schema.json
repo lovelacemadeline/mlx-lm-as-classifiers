@@ -104,7 +104,9 @@
         "delta_cache": { "type": "boolean", "default": true,
           "description": "Reuse the KV of the longest common token prefix with earlier prompts (the server's delta cache), so only the changed tail is prefilled. false runs this request without it; the declared prefix is cached either way." },
         "debug": { "type": "boolean", "default": false,
-          "description": "Include the readout token ids and raw logits in each answer." }
+          "description": "Include the readout token ids and raw logits in each answer." },
+        "vision_soft_tokens": { "type": "integer", "enum": [70, 140, 280],
+          "description": "Soft-token budget per image (Gemma 4: at most budget x 9 patches, pooled 3 x 3 to at most budget tokens). Omit for the runner's budget (280 unless the server was started with another)." }
       }
     }
   }

@@ -96,12 +96,19 @@ not applied (``moe_kernel_layers`` is 0). ``int8_expert_layers`` counts the swap
 from __future__ import annotations
 
 import copy
+import dataclasses
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .images import ImageSlot, ImageTokens, image_tokens_from_config, keyed_tokens
+from .images import (
+    SOFT_TOKEN_BUDGETS,
+    ImageSlot,
+    ImageTokens,
+    image_tokens_from_config,
+    keyed_tokens,
+)
 from .prompt_cache import PromptCacheStore
 from .runner import LogitRow, PrefixCache, Readout, check_images, check_prefill_args
 from .template import ChatTemplate, HFChatTemplate
@@ -244,10 +251,25 @@ class MLXRunner:
     #: tables, no one-hot position matmul, no all-zero mask); bit-equal to the vendored
     #: path on E2B and the 26B. False runs the vendored path (the reference).
     vision_fast: bool = True
+    #: Story 6.7: soft-token budget per image (70, 140 or 280; None keeps the
+    #: checkpoint's 280). Sets ``image_tokens.max_soft_tokens``, so prompts compile to
+    #: the budget's run length and the tower resizes to it; a request's
+    #: ``options.vision_soft_tokens`` overrides it for that request.
+    vision_soft_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if self.chat_template is None:
             self.chat_template = HFChatTemplate(self.tokenizer)
+        if self.vision_soft_tokens is not None:
+            if self.vision_soft_tokens not in SOFT_TOKEN_BUDGETS:
+                raise ValueError(
+                    f"vision_soft_tokens {self.vision_soft_tokens} is not one of "
+                    f"{SOFT_TOKEN_BUDGETS}"
+                )
+            if self.image_tokens is not None:
+                self.image_tokens = dataclasses.replace(
+                    self.image_tokens, max_soft_tokens=self.vision_soft_tokens
+                )
         lm = _text_model(self.model)
         self._backbone = lm.model
         self._lm = lm
@@ -469,7 +491,10 @@ class MLXRunner:
         tower = self.load_vision()
         before = tower.encodes
         t0 = time.perf_counter()
-        feats = tower.encode_png(slot.data, slot.sha256)
+        budget = slot.max_soft_tokens
+        if budget is None and self.image_tokens is not None:
+            budget = self.image_tokens.max_soft_tokens
+        feats = tower.encode_png(slot.data, slot.sha256, budget)
         if tower.encodes != before:
             self.vision_encode_ms.append((time.perf_counter() - t0) * 1e3)
         if feats.shape[0] != slot.length:

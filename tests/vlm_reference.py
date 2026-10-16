@@ -3,12 +3,13 @@
 Run in-process by ``tests/test_vision_parity.py`` when mlx-vlm is importable (the
 ``vision-dev`` extra), else as a script under ``$MLX_VLM_PYTHON``::
 
-    $MLX_VLM_PYTHON tests/vlm_reference.py REPO IDS.json IMAGE.png OUT.npz
+    $MLX_VLM_PYTHON tests/vlm_reference.py REPO IDS.json IMAGE.png OUT.npz [MAX_SOFT_TOKENS]
 
 Given the prompt token ids our compiler produced and the PNG, it saves mlx-vlm's
 pixel values, projected soft tokens, merged input embeddings, per-layer inputs
 and the full-forward logits at the last position, all as float32, plus the
-mlx-vlm and mlx versions.
+mlx-vlm and mlx versions. ``MAX_SOFT_TOKENS`` (default 280) is the processor's
+soft-token budget (story 6.7).
 """
 
 from __future__ import annotations
@@ -18,14 +19,15 @@ import json
 import sys
 
 
-def reference(repo: str, ids: list[int], png: bytes) -> dict:
+def reference(repo: str, ids: list[int], png: bytes, max_soft_tokens: int = 280) -> dict:
     import mlx.core as mx
     import numpy as np
     from mlx_vlm import load
     from PIL import Image
 
     model, processor = load(repo)
-    data, n_soft = processor.image_processor([Image.open(io.BytesIO(png))])
+    image = Image.open(io.BytesIO(png))
+    data, n_soft = processor.image_processor([image], max_soft_tokens=max_soft_tokens)
     pixels = mx.array(data["pixel_values"])
     input_ids = mx.array([ids])
     feats = model.encode_image(pixels)
@@ -53,5 +55,6 @@ if __name__ == "__main__":
     with open(ids_path) as f:
         ids = json.load(f)
     with open(png_path, "rb") as f:
-        ref = reference(repo, ids, f.read())
+        budget = int(sys.argv[5]) if len(sys.argv) > 5 else 280
+        ref = reference(repo, ids, f.read(), budget)
     np.savez(out, **{k: v for k, v in ref.items() if v is not None})

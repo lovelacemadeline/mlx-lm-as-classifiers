@@ -118,9 +118,12 @@ class FastEncoder:
     def clear(self) -> None:
         self._shapes.clear()
 
-    def uint8(self, png: bytes) -> np.ndarray:
+    def uint8(self, png: bytes, max_soft_tokens: int | None = None) -> np.ndarray:
+        """The resized ``[H, W, 3]`` uint8 image at ``max_soft_tokens`` (default: the
+        tower's); each budget is its own pinned shape (story 6.7)."""
         vc = self.tower.vision_config
-        return resized_uint8(png, vc.patch_size, self.tower.max_soft_tokens, vc.pooling_kernel_size)
+        budget = max_soft_tokens or self.tower.max_soft_tokens
+        return resized_uint8(png, vc.patch_size, budget, vc.pooling_kernel_size)
 
     def shape(self, height: int, width: int) -> _Shape:
         key = (height, width)
@@ -178,8 +181,8 @@ class FastEncoder:
         image = mx.array(image) if not isinstance(image, mx.array) else image
         return self.forward(image, self.shape(int(image.shape[0]), int(image.shape[1])))
 
-    def encode_png(self, png: bytes) -> mx.array:
-        return self.encode_uint8(self.uint8(png))
+    def encode_png(self, png: bytes, max_soft_tokens: int | None = None) -> mx.array:
+        return self.encode_uint8(self.uint8(png, max_soft_tokens))
 
 
 def _qkv(layer: Any, x: mx.array):

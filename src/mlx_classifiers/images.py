@@ -20,6 +20,17 @@ id inside an image run is replaced by a negative id derived from that image's
 sha256, so two prompts that differ only in their image diverge at the image's
 first soft token, and the same image at the same place still shares the
 prefix.
+
+**Soft-token budget** (story 6.7). ``max_soft_tokens`` is a budget, not a count:
+the processor resizes to at most ``budget * 9`` patches, and the tower pools
+those 3 x 3 to ``N <= budget`` soft tokens. Gemma 4 supports 70, 140, 280 (the
+checkpoint default), 560 and 1120; this library supports :data:`SOFT_TOKEN_BUDGETS`
+(70, 140, 280). A 160 x 192 gridworld frame is 720 x 864 = 2430 patches, 270
+tokens at 280; 480 x 576 = 1080 patches, 120 tokens at 140; 336 x 432 = 567
+patches, 63 tokens at 70. Tower cost follows the patch count (attention is
+quadratic in it), so 140 is 2.25x fewer patches and 70 is 4.3x fewer. A slot
+records the budget it was compiled at, and the delta-cache key includes it, so the
+same PNG at two budgets never shares KV.
 """
 
 from __future__ import annotations
@@ -38,7 +49,9 @@ from pathlib import Path
 from .errors import PromptError
 
 __all__ = [
+    "DEFAULT_SOFT_TOKENS",
     "IMAGE_BLOCK_TYPE",
+    "SOFT_TOKEN_BUDGETS",
     "ImageSlot",
     "ImageTokens",
     "decode_png_base64",
@@ -53,6 +66,10 @@ __all__ = [
 ]
 
 IMAGE_BLOCK_TYPE = "image/png"
+#: Gemma 4's processor default (``max_soft_tokens`` / ``vision_soft_tokens_per_image``).
+DEFAULT_SOFT_TOKENS = 280
+#: The soft-token budgets this library supports per image (story 6.7).
+SOFT_TOKEN_BUDGETS = (70, 140, 280)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
@@ -170,24 +187,33 @@ def image_tokens_from_config(model_dir: str | Path) -> ImageTokens | None:
 class ImageSlot:
     """One image in a compiled prompt: its soft-token run is
     ``tokens[start : start + length]`` (the image-token ids between boi and eoi);
-    ``sha256`` is the hash of the PNG bytes, which ride along in ``data``."""
+    ``sha256`` is the hash of the PNG bytes, which ride along in ``data``.
+    ``max_soft_tokens``: the budget the run was compiled at (story 6.7); None means
+    the runner's own."""
 
     start: int
     length: int
     sha256: str
     data: bytes = field(default=b"", repr=False, compare=False)
+    max_soft_tokens: int | None = None
 
     @property
     def end(self) -> int:
         return self.start + self.length
 
     @classmethod
-    def from_png(cls, start: int, length: int, data: bytes) -> ImageSlot:
-        return cls(start, length, hashlib.sha256(data).hexdigest(), data)
+    def from_png(
+        cls, start: int, length: int, data: bytes, max_soft_tokens: int | None = None
+    ) -> ImageSlot:
+        return cls(start, length, hashlib.sha256(data).hexdigest(), data, max_soft_tokens)
 
     def describe(self) -> dict[str, object]:
-        """The fixture/wire record: ``{start, length, sha256}``."""
-        return {"start": self.start, "length": self.length, "sha256": self.sha256}
+        """The fixture/wire record: ``{start, length, sha256}``, plus ``max_soft_tokens``
+        when the budget is not the default 280 (so default fixtures are unchanged)."""
+        out: dict[str, object] = {"start": self.start, "length": self.length, "sha256": self.sha256}
+        if self.max_soft_tokens is not None and self.max_soft_tokens != DEFAULT_SOFT_TOKENS:
+            out["max_soft_tokens"] = self.max_soft_tokens
+        return out
 
 
 def find_image_runs(tokens: Sequence[int], image_token_id: int) -> list[tuple[int, int]]:
@@ -206,9 +232,14 @@ def find_image_runs(tokens: Sequence[int], image_token_id: int) -> list[tuple[in
     return runs
 
 
-def image_key_id(sha256: str) -> int:
-    """The negative stand-in id for an image's soft tokens in a delta-cache key."""
-    return -1 - int(sha256[:15], 16)
+def image_key_id(sha256: str, max_soft_tokens: int | None = None) -> int:
+    """The negative stand-in id for an image's soft tokens in a delta-cache key.
+    With a budget (story 6.7) the id also depends on it: the same PNG at 140 and 280
+    is different soft tokens and must not share a cached prefix."""
+    if max_soft_tokens is None:
+        return -1 - int(sha256[:15], 16)
+    digest = hashlib.sha256(f"{sha256}:{max_soft_tokens}".encode()).hexdigest()
+    return -1 - int(digest[:15], 16)
 
 
 def keyed_tokens(tokens: Sequence[int], images: Sequence[ImageSlot] = ()) -> tuple[int, ...]:
@@ -220,7 +251,7 @@ def keyed_tokens(tokens: Sequence[int], images: Sequence[ImageSlot] = ()) -> tup
     for slot in images:
         if slot.end > len(key):
             raise ValueError(f"image run [{slot.start}, {slot.end}) beyond {len(key)} tokens")
-        key[slot.start : slot.end] = [image_key_id(slot.sha256)] * slot.length
+        key[slot.start : slot.end] = [image_key_id(slot.sha256, slot.max_soft_tokens)] * slot.length
     return tuple(key)
 
 

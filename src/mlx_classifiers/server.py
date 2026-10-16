@@ -506,7 +506,9 @@ def build_app_from_args(args: argparse.Namespace) -> Litestar:
     if args.log:
         print(f"decision log: {args.log}")
     return create_app(
-        load=lambda: MLXRunner.load(args.model),
+        load=lambda: MLXRunner.load(
+            args.model, vision_soft_tokens=getattr(args, "vision_tokens", None)
+        ),
         prefix_cache_size=args.prefix_cache_size,
         calibration=calibration,
         log=args.log,

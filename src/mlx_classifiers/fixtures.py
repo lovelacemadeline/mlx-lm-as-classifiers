@@ -255,6 +255,20 @@ SEED_CASES: tuple[FixtureCase, ...] = (
         "Yes/No about an image block scored by sequence (the image sits in the cached prompt)",
         _req(_IS_RED, _PICTURE, "sequence", prefix=_PICTURE_PREFIX),
     ),
+    # Story 6.7: one case per non-default soft-token budget, the budget on the wire
+    # (``options.vision_soft_tokens``) and in ``expected.images[].max_soft_tokens``.
+    FixtureCase(
+        "choice-first-token-image-gridworld-vt140",
+        "the gridworld frame case at a 140 soft-token budget (120 tokens; story 6.7)",
+        _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX)
+        | {"options": {"vision_soft_tokens": 140}},
+    ),
+    FixtureCase(
+        "choice-first-token-image-gridworld-vt70",
+        "the gridworld frame case at a 70 soft-token budget (63 tokens; story 6.7)",
+        _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX)
+        | {"options": {"vision_soft_tokens": 70}},
+    ),
 )
 
 

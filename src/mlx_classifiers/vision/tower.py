@@ -41,7 +41,12 @@ _CLIP_KEYS = ("input_max", "input_min", "output_max", "output_min")
 class VisionTower(nn.Module):
     """``vision_tower`` + ``embed_vision`` under their checkpoint names, plus the
     processor numbers. :meth:`encode_png` returns ``[N, text_hidden]`` soft tokens
-    in the text model's embedding space (bf16), memoised by PNG sha256."""
+    in the text model's embedding space (bf16), memoised by (PNG sha256, budget).
+
+    ``max_soft_tokens`` is the default soft-token budget (the checkpoint's 280); a
+    call may pass another (story 6.7: 70 / 140 / 280). The budget sets the resize, so
+    the patch count (``<= budget * 9``), the tower's sequence length and the output
+    count (``patches / 9``) all follow it."""
 
     def __init__(
         self,
@@ -79,26 +84,30 @@ class VisionTower(nn.Module):
             object.__setattr__(self, "_fast_encoder", FastEncoder(self, compile=self._compile))
         return self._fast_encoder
 
-    def pixel_values(self, png: bytes) -> mx.array:
+    def pixel_values(self, png: bytes, max_soft_tokens: int | None = None) -> mx.array:
         vc = self.vision_config
-        pixels = preprocess_png(png, vc.patch_size, self.max_soft_tokens, vc.pooling_kernel_size)
+        budget = max_soft_tokens or self.max_soft_tokens
+        pixels = preprocess_png(png, vc.patch_size, budget, vc.pooling_kernel_size)
         return mx.array(pixels)
 
     def encode_pixels(self, pixel_values: mx.array) -> mx.array:
         """``[1, N, text_hidden]`` for ``[1, 3, H, W]`` pixels (mlx-vlm ``encode_image``)."""
         return self.embed_vision(self.vision_tower(pixel_values))
 
-    def encode_png(self, png: bytes, sha256: str | None = None) -> mx.array:
-        key = sha256 or hashlib.sha256(png).hexdigest()
+    def encode_png(
+        self, png: bytes, sha256: str | None = None, max_soft_tokens: int | None = None
+    ) -> mx.array:
+        budget = max_soft_tokens or self.max_soft_tokens
+        key = (sha256 or hashlib.sha256(png).hexdigest(), budget)
         with self._lock:
             hit = self._features.get(key)
             if hit is not None:
                 self._features.move_to_end(key)
                 return hit
         if self.fast:
-            feats = self.fast_encoder().encode_png(png)
+            feats = self.fast_encoder().encode_png(png, budget)
         else:
-            feats = self.encode_pixels(self.pixel_values(png))[0]
+            feats = self.encode_pixels(self.pixel_values(png, budget))[0]
         mx.eval(feats)
         with self._lock:
             self.encodes += 1

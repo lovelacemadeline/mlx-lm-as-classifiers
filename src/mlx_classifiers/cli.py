@@ -66,6 +66,13 @@ def _add_server_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--log", type=Path, default=None, help="append every served decision to this JSONL file"
     )
+    p.add_argument(
+        "--vision-tokens",
+        type=int,
+        choices=(70, 140, 280),
+        default=None,
+        help="soft-token budget per image (6.7; default: the checkpoint's 280)",
+    )
     p.set_defaults(func=run)
 
 

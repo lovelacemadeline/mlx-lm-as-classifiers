@@ -32,12 +32,20 @@ pytest.importorskip("PIL")
 
 from mlx_classifiers import SystemOneRequest
 from mlx_classifiers.calibrate import gather
-from mlx_classifiers.images import write_png
+from mlx_classifiers.images import DEFAULT_SOFT_TOKENS, write_png
 from mlx_classifiers.prompt import compile_question
 from mlx_classifiers.readout import bind_options
 
 EMBED_TOL = 0.0625  # bf16 has 8 significant bits: one step at |x| in [8, 16)
 LOGIT_TOL = 0.2
+# Story 6.7, budgets 140 and 70. On one mlx (0.32.4, both codes in the mlx-vlm venv)
+# our tower equals mlx-vlm's bit for bit at 280, 140 and 70. Across this repo's pinned
+# mlx 0.32.0 and the reference's 0.32.4 the soft tokens are exact at 280 but differ by
+# bf16 rounding at the smaller shapes (measured max |d| 0.0156 on E2B at 140 and 70,
+# 0 on the 26B at 140, 0.0625 at 70), and the option logits move by up to 0.125 on E2B
+# and 0.25 / 0.44 on the 26B at 140 / 70, argmax unchanged (2026-10-16).
+OFF_DEFAULT_FEAT_TOL = 0.0625
+OFF_DEFAULT_LOGIT_TOL = 0.5
 
 MOE = "mlx-community/gemma-4-26B-A4B-it-qat-4bit"
 
@@ -80,18 +88,18 @@ def frame() -> bytes:
     return write_png(160, 192, rows)
 
 
-def _reference(repo: str, ids: list[int], png: bytes, tmp_path: Path) -> dict:
+def _reference(repo: str, ids: list[int], png: bytes, tmp_path: Path, budget: int = 280) -> dict:
     if _IN_PROCESS:
         sys.path.insert(0, str(Path(__file__).parent))
         from vlm_reference import reference
 
-        return reference(repo, ids, png)
+        return reference(repo, ids, png, budget)
     ids_path, png_path, out = tmp_path / "ids.json", tmp_path / "f.png", tmp_path / "ref.npz"
     ids_path.write_text(json.dumps(ids))
     png_path.write_bytes(png)
     script = Path(__file__).parent / "vlm_reference.py"
     run = subprocess.run(
-        [_EXTERNAL, "-I", str(script), repo, str(ids_path), str(png_path), str(out)],
+        [_EXTERNAL, "-I", str(script), repo, str(ids_path), str(png_path), str(out), str(budget)],
         check=False,
         capture_output=True,
         text=True,
@@ -102,10 +110,12 @@ def _reference(repo: str, ids: list[int], png: bytes, tmp_path: Path) -> dict:
         return {k: z[k] for k in z.files} | {"versions": "external"}
 
 
+@pytest.mark.parametrize("budget", [280, 140, 70], ids=["vt280", "vt140", "vt70"])
 @pytest.mark.parametrize("repo", [GEMMA, MOE], ids=["e2b", "26b"])
-def test_merged_embeddings_and_readout_match_mlx_vlm(repo, tmp_path):
+def test_merged_embeddings_and_readout_match_mlx_vlm(repo, budget, tmp_path):
     """E2B: causal image tokens, per-layer inputs. 26B-A4B: bidirectional image
-    blocks (the mask overlay), standardized tower, no per-layer inputs."""
+    blocks (the mask overlay), standardized tower, no per-layer inputs. Story 6.7:
+    at each soft-token budget, against mlx-vlm's processor at the same budget."""
     if not _cached(repo):
         pytest.skip(f"{repo} weights not in HF cache")
     from mlx_classifiers.mlx_runner import MLXRunner
@@ -120,6 +130,7 @@ def test_merged_embeddings_and_readout_match_mlx_vlm(repo, tmp_path):
                 {"type": "image/png", "base64": base64.b64encode(png).decode()},
             ],
             "questions": {"q": QUESTION},
+            "options": {"vision_soft_tokens": budget},
         }
     )
     runner = MLXRunner.load(repo)
@@ -130,14 +141,20 @@ def test_merged_embeddings_and_readout_match_mlx_vlm(repo, tmp_path):
         tokenize=runner.tokenize,
         image_tokens=runner.image_tokens,
     )
-    ref = _reference(repo, list(p.tokens), png, tmp_path)  # before our weights grow the heap
+    # before our weights grow the heap
+    ref = _reference(repo, list(p.tokens), png, tmp_path, budget)
 
     tower = runner.load_vision()
-    pixels = np.array(tower.pixel_values(png))
+    pixels = np.array(tower.pixel_values(png, budget))
     assert np.array_equal(pixels, ref["pixels"])
     (slot,) = p.images
     feats = runner._image_features(slot)
-    assert np.array_equal(np.array(feats.astype(mx.float32)), ref["feats"])
+    d_feat = float(np.abs(np.array(feats.astype(mx.float32)) - ref["feats"]).max())
+    print(f"[6.7] budget {budget}: {slot.length} soft tokens, max|d| {d_feat:.3g}")
+    if budget == DEFAULT_SOFT_TOKENS:
+        assert d_feat == 0
+    else:  # mlx 0.32.0 here vs 0.32.4 under mlx-vlm: see OFF_DEFAULT_FEAT_TOL
+        assert d_feat <= OFF_DEFAULT_FEAT_TOL
 
     ids = mx.array(p.tokens)
     pieces = [(slot.start, slot.length, feats)]
@@ -148,7 +165,7 @@ def test_merged_embeddings_and_readout_match_mlx_vlm(repo, tmp_path):
         raw = runner._backbone._get_per_layer_inputs(per_layer_token_ids(ids, pieces)[None])
         d_pl = float(np.abs(np.array(raw[0].astype(mx.float32)) - ref["per_layer"]).max())
     print(f"[6.4] {ref['versions']}: max|d| embeds {d_embed:.3g}, per-layer {d_pl:.3g}")
-    assert d_embed <= EMBED_TOL and d_pl <= EMBED_TOL
+    assert d_embed <= max(EMBED_TOL, d_feat) and d_pl <= EMBED_TOL
 
     binding = bind_options(p, runner.tokenize)
     r = runner.prefill(p.tokens, None, [p.readout_position], images=p.images, delta=False)
@@ -157,4 +174,5 @@ def test_merged_embeddings_and_readout_match_mlx_vlm(repo, tmp_path):
     ref_opt = [float(ref["logits"][t]) for t in binding.token_ids]
     print(f"[6.4] option logits ours {np.round(ours_opt, 3)} mlx-vlm {np.round(ref_opt, 3)}")
     assert int(np.argmax(ours_opt)) == int(np.argmax(ref_opt))
-    assert max(abs(a - b) for a, b in zip(ours_opt, ref_opt, strict=True)) <= LOGIT_TOL
+    tol = LOGIT_TOL if budget == DEFAULT_SOFT_TOKENS else OFF_DEFAULT_LOGIT_TOL
+    assert max(abs(a - b) for a, b in zip(ours_opt, ref_opt, strict=True)) <= tol

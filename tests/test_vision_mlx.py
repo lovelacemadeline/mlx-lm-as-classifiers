@@ -201,3 +201,15 @@ def test_vision_fast_is_bit_equal_to_the_vendored_path(tower):
         fast = enc.encode_png(png)
         assert fast.shape == slow.shape == (270, 1536) and fast.dtype == slow.dtype
         assert mx.array_equal(fast, slow).item()
+
+
+@pytest.mark.parametrize(("budget", "n"), [(140, 120), (70, 63)])
+def test_vision_fast_is_bit_equal_at_each_soft_token_budget(tower, budget, n):
+    """Story 6.7: a smaller budget is a smaller pinned shape on the same fast path,
+    still bit-equal to the vendored path at that budget."""
+    tower.fast = True
+    png = frame_png((20, 20, 220))
+    slow = tower.encode_pixels(tower.pixel_values(png, budget))[0]
+    fast = tower.encode_png(png, max_soft_tokens=budget)
+    assert fast.shape == slow.shape == (n, 1536)
+    assert mx.array_equal(fast, slow).item()
