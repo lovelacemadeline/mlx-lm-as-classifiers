@@ -56,6 +56,34 @@ def test_systemone_returns_a_schema_valid_response(app):
     assert resp.model == "fake"
 
 
+def test_label_style_passes_through_to_decide(app):
+    """Story 1.8: ``options.label_style`` reaches ``decide`` unchanged."""
+    moves = {
+        "type": "choice",
+        "instructions": "Which action?",
+        "criteria": {"up": None, "down": None, "wait": None},
+    }
+    long_names = {"department": QUESTIONS["department"]}
+    with TestClient(app=app) as client:
+        ok = client.post(
+            "/v1/systemone",
+            json={
+                **body(),
+                "questions": {"move": moves},
+                "options": {"label_style": "option-text", "debug": True},
+            },
+        )
+        bad = client.post(
+            "/v1/systemone",
+            json={**body(), "questions": long_names, "options": {"label_style": "option-text"}},
+        )
+    assert ok.status_code == 200
+    ids = ok.json()["answers"]["move"]["debug"]["option_token_ids"]
+    runner = FakeRunner()
+    assert all(len(v) == 1 for v in ids.values()) and ids["up"] != runner.tokenize("A")
+    assert bad.status_code == 422 and 'label_style = \\"letters\\"' in bad.text
+
+
 def test_invalid_request_is_422_with_field_paths(app):
     bad = body()
     bad["questions"] = {

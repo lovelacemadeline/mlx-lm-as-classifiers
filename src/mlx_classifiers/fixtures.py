@@ -73,8 +73,10 @@ class FixtureCase:
 
     ``prefix_cached``: first-token mode KV-caches ``tokens[:prefix_len]`` (the
     system turn) and prefills the rest from it. ``label_style = "option-text"``
-    renders the option texts as labels (the sequence-mode prompt) and then reads
-    them out first-token, which must fail when a label is more than one token.
+    runs the case with the wire option ``options.label_style = "option-text"``
+    (story 1.8): the option names are the labels, read out first-token, which must
+    fail when a name is more than one token. A request that sets
+    ``options.label_style`` itself must agree with ``label_style``.
     """
 
     id: str
@@ -90,6 +92,12 @@ class FixtureCase:
             raise ValueError(f"case {self.id}: prefix_cached needs a request prefix")
         if self.label_style not in ("letters", "option-text"):
             raise ValueError(f"case {self.id}: unknown label_style {self.label_style!r}")
+        wire = self.request.get("options", {}).get("label_style", self.label_style)
+        if wire != self.label_style:
+            raise ValueError(
+                f"case {self.id}: request options.label_style {wire!r} "
+                f"disagrees with label_style {self.label_style!r}"
+            )
 
 
 _PREFIX = "You are the support triage router for a payments company. Answer precisely."
@@ -194,6 +202,15 @@ def _case_fields(case: FixtureCase | Mapping[str, Any]) -> tuple[dict, bool, str
     return case["request"], bool(case.get("prefix_cached")), case.get("label_style", "letters")
 
 
+def _with_label_style(req: SystemOneRequest, label_style: str) -> SystemOneRequest:
+    """``req`` with ``options.label_style`` set, so the case compiles through the
+    same path as a wire request carrying that option."""
+    opts = req.effective_options
+    if opts.label_style == label_style:
+        return req
+    return req.model_copy(update={"options": opts.model_copy(update={"label_style": label_style})})
+
+
 def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
     """Run one case (a :class:`FixtureCase` or a loaded fixture dict) through
     ``runner`` and return the result block: the shape of a fixture's ``expected``.
@@ -202,13 +219,10 @@ def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
     (from the system-turn cache when ``prefix_cached``), gather, raw softmax.
     """
     request, prefix_cached, label_style = _case_fields(case)
-    req = SystemOneRequest.model_validate(request)
+    req = _with_label_style(SystemOneRequest.model_validate(request), label_style)
     (name,) = req.questions
     readout = req.effective_options.readout
-    render = "sequence" if label_style == "option-text" else readout
-    prompt = compile_question(
-        req, name, template=runner.chat_template, tokenize=runner.tokenize, readout=render
-    )
+    prompt = compile_question(req, name, template=runner.chat_template, tokenize=runner.tokenize)
     out: Result = {
         "tokens": list(prompt.tokens),
         "prefix_len": prompt.prefix_len,

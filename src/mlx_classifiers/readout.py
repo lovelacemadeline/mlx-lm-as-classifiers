@@ -7,6 +7,10 @@ template position. A prefix tree over those id sequences reports the first
 depth at which every label is distinct. First-token mode needs depth one *and*
 one token per label; anything else is a :class:`LabelTokenizationError`, never
 a silent fallback. Use ``options.readout = "sequence"`` for such options.
+
+With ``options.label_style = "option-text"`` (story 1.8) the labels are the
+option names themselves, so the same rules apply to the names; the error then
+also points back at letter labels.
 """
 
 from __future__ import annotations
@@ -29,6 +33,10 @@ __all__ = [
 
 Tokenize = Callable[[str], list[int]]
 SEQUENCE_HINT = 'use options.readout = "sequence", or labels that are single tokens'
+OPTION_TEXT_HINT = (
+    'use options.readout = "sequence", or options.label_style = "letters" '
+    "(or option names that are single tokens)"
+)
 
 
 def emitted_label(context_text: str, label: str) -> str:
@@ -42,6 +50,7 @@ def label_token_ids(
     label: str,
     tokenize: Tokenize,
     context_tokens: Sequence[int] | None = None,
+    hint: str = SEQUENCE_HINT,
 ) -> tuple[int, ...]:
     """Token ids of ``label`` as it would appear right after ``context_text``.
 
@@ -53,7 +62,7 @@ def label_token_ids(
     full = tuple(tokenize(context_text + emitted_label(context_text, label)))
     if full[: len(base)] != base or len(full) == len(base):
         raise LabelTokenizationError(
-            f"label {label!r} merges with the token at the readout position; {SEQUENCE_HINT}"
+            f"label {label!r} merges with the token at the readout position; {hint}"
         )
     return full[len(base) :]
 
@@ -112,36 +121,41 @@ def bind_labels(
     context_text: str,
     tokenize: Tokenize,
     context_tokens: Sequence[int] | None = None,
+    hint: str = SEQUENCE_HINT,
 ) -> tuple[tuple[int, ...], PrefixTree]:
     """Resolve labels in context and require first-token readout to be possible.
 
     Returns one mask id per label plus the prefix tree. Raises
     :class:`LabelTokenizationError` naming the offending labels if two share a first
-    token (distinguishing depth > 1) or a label is more than one token.
+    token (distinguishing depth > 1) or a label is more than one token; ``hint``
+    ends the message with what to do instead.
     """
     if len(set(labels)) != len(labels):
         raise LabelTokenizationError(f"duplicate labels {list(labels)}")
     base = tuple(context_tokens) if context_tokens is not None else tuple(tokenize(context_text))
-    seqs = {lab: label_token_ids(context_text, lab, tokenize, base) for lab in labels}
+    seqs = {lab: label_token_ids(context_text, lab, tokenize, base, hint) for lab in labels}
     tree = PrefixTree.build(seqs)
     if tree.collisions:
         names = "; ".join(" and ".join(repr(x) for x in g) for g in tree.collisions)
         where = f"depth {tree.depth}" if tree.depth else "no depth (identical token ids)"
         raise LabelTokenizationError(
             f"labels {names} share a first token; they first differ at {where}, "
-            f"which first-token mode cannot read; {SEQUENCE_HINT}"
+            f"which first-token mode cannot read; {hint}"
         )
     multi = [lab for lab, ids in seqs.items() if len(ids) != 1]
     if multi:
         detail = ", ".join(f"{lab!r} -> {len(seqs[lab])} tokens {list(seqs[lab])}" for lab in multi)
-        raise LabelTokenizationError(f"labels are not single tokens: {detail}; {SEQUENCE_HINT}")
+        raise LabelTokenizationError(f"labels are not single tokens: {detail}; {hint}")
     return tuple(seqs[lab][0] for lab in labels), tree
 
 
 def bind_options(prompt: CompiledPrompt, tokenize: Tokenize) -> OptionBinding:
-    """Bind ``prompt``'s options to mask ids at its readout position."""
+    """Bind ``prompt``'s options to mask ids at its readout position. With
+    ``label_style = "option-text"`` the labels are the option names (Yes/No for
+    ``noul``), and an error points at sequence mode or letter labels."""
     labels = tuple(prompt.label_for(i) for i in range(len(prompt.options)))
-    ids, tree = bind_labels(labels, prompt.text, tokenize, prompt.tokens)
+    hint = OPTION_TEXT_HINT if prompt.label_style == "option-text" else SEQUENCE_HINT
+    ids, tree = bind_labels(labels, prompt.text, tokenize, prompt.tokens, hint)
     return OptionBinding(
         options=prompt.options,
         labels=labels,

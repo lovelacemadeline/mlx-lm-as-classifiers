@@ -87,6 +87,30 @@ that ignores them is still Jev-compatible.
   loglikelihood from the shared prefix cache, length-normalised. Slower, for
   options whose first token does not discriminate.
 
+## Label style (x-local, story [1.8](../stories/1-8-option-text-labels-wire-option.md))
+
+`options.label_style` chooses what the model is asked to emit in
+`first-token` mode:
+
+- `letters` (default): options are listed as `A. name: description`, the
+  answer line asks for a letter, and the letters are the bound labels.
+- `option-text`: options are listed by their own name (`- name: description`,
+  the same rendering as `sequence` mode), the answer line asks for one option
+  exactly as written, and each `choice` name / `score` level is bound as its
+  own first-token label. Every name must be a single token in context, else
+  the request fails with a `LabelTokenizationError` pointing at
+  `readout: "sequence"` or `label_style: "letters"`. `noul` always uses
+  Yes/No.
+
+```json
+{ "options": { "label_style": "option-text" } }
+```
+
+Use it when letter labels carry a prior of their own: on small models a fixed
+letter can win regardless of the state (label bias), and permutations only
+flatten that towards uniform. `sequence` mode already answers by option text,
+so the field has no effect there.
+
 ## Versioning
 
 The schema `$id` carries `/v1/`. Additive x-local fields do not bump the

@@ -37,7 +37,7 @@ One JSON object per file, named `<id>.json`:
 | `path.prefill` | Always `"split"`: MLXRunner's split prefill (see below). |
 | `path.prefill_step` | Chunk size of the cache-only rows (2048). |
 | `readout` | `"first-token"` or `"sequence"` (`request.options.readout`, default first-token). |
-| `label_style` | `"letters"` (the normal compile) or `"option-text"` (see the error case). |
+| `label_style` | `"letters"` (the normal compile) or `"option-text"`: the case runs with the wire option `options.label_style: "option-text"` (story [1.8](../stories/1-8-option-text-labels-wire-option.md); see the error case). |
 | `prefix_cached` | First-token only: `true` means the system turn was KV-cached and the prompt prefilled from it. |
 | `question` | Name of the request's single question. |
 | `request` | The `/v1/systemone` wire request ([wire schema](wire-schema.md)), exactly one question. |
@@ -119,9 +119,10 @@ identical logits, but the cache boundary is recorded so a port can follow it.
 Eight cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`): noul, choice
 and score in both readout modes; a prefix-cached case; states as a string, a
 JSON object and a list; a case with no system turn; sequence options of more
-than one token; and `choice-first-token-multi-token-label-error`, which renders
-option texts as labels (`label_style: "option-text"`) and reads them out
-first-token. `chargeback` is two Gemma tokens, so the expected result is a
+than one token; and `choice-first-token-multi-token-label-error`, which runs
+with option-text labels (`label_style: "option-text"`, i.e. the wire option of
+story [1.8](../stories/1-8-option-text-labels-wire-option.md)) and reads the
+option names out first-token. `chargeback` is two Gemma tokens, so the expected result is a
 `LabelTokenizationError`, with each label's in-context ids in
 `option_token_ids`.
 

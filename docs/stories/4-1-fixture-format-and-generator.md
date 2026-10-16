@@ -53,7 +53,8 @@ them from the Python runner. The shape is documented in
   enter a fixture.
 - The multi-token-label case renders option texts as labels
   (`label_style: "option-text"`, the sequence-mode prompt) and reads them out
-  first-token. On Gemma `chargeback` is two tokens `[10690, 1942]`, so binding
+  first-token. Since story 1.8 it does so through the wire option
+  `options.label_style`, not a private compile. On Gemma `chargeback` is two tokens `[10690, 1942]`, so binding
   raises. Letters and Yes/No are always single tokens, so the normal compile
   cannot reach this error.
 - Fixtures pin the split path, never the naive full forward

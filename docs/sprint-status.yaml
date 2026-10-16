@@ -5,7 +5,7 @@ epics:
     title: Schema and readout core (model-agnostic)
     status: completed
     story_home: docs/stories/
-    stories_count: 7
+    stories_count: 8
     stories:
       - id: "1.1"
         title: Wire schema models and validation
@@ -27,6 +27,9 @@ epics:
         status: completed
       - id: "1.7"
         title: Order permutation for position-bias reduction
+        status: completed
+      - id: "1.8"
+        title: Option-text labels as a wire option
         status: completed
   - epic: 2
     title: Gemma 4 E2B INT8 runner on MLX

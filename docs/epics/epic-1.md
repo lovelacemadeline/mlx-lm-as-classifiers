@@ -26,6 +26,7 @@ is unit-tested on any machine. The real runner (Epic 2) plugs in behind the
 | 1.5 | Masked softmax, temperature calibration, confidence | completed |
 | 1.6 | Sequence-scoring readout mode | completed |
 | 1.7 | Order permutation for position-bias reduction | completed |
+| 1.8 | Option-text labels as a wire option | completed |
 
 ## Related
 - [PRD](../product/prd-system-one-classifier.md), [wire-schema](../reference/wire-schema.md)

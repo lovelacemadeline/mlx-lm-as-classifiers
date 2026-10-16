@@ -129,3 +129,27 @@ def test_2k_prompt_projects_only_the_readout_row(runner):
     readout = runner.prefill(tokens)
     assert readout.positions == (2047,)
     assert len(runner.head_calls) == 1 and runner.head_calls[0][:2] == (1, 1)
+
+
+def test_option_text_labels_bind_to_the_bare_name_tokens(runner):
+    """Story 1.8: a 4-option choice with ``label_style = "option-text"`` binds each
+    name's bare Gemma token (after ``<|turn>model\n``), not a letter."""
+    req = SystemOneRequest.model_validate(
+        {
+            "prefix": "You play a gridworld. Answer with one action.",
+            "state": "An enemy stands two squares north of you.",
+            "questions": {
+                "move": {
+                    "type": "choice",
+                    "instructions": "Which way do you step?",
+                    "criteria": {"up": None, "down": None, "left": None, "right": None},
+                }
+            },
+            "options": {"label_style": "option-text", "debug": True},
+        }
+    )
+    ans = decide(req, runner).answers["move"]
+    expected = {"up": [1048], "down": [3843], "left": [989], "right": [898]}
+    assert ans.debug.option_token_ids == expected
+    assert expected == {name: runner.tokenize(name) for name in expected}
+    assert sum(ans.raw_probabilities.values()) == pytest.approx(1.0)

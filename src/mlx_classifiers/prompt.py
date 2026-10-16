@@ -4,7 +4,9 @@ Layout (separate mode: one prompt per question; packed mode is out of scope):
 
 - system turn = ``request.prefix`` -- the cacheable head, byte-identical across
   requests whatever the ``state``;
-- user turn = the rendered ``state`` plus one question with its labelled options;
+- user turn = the rendered ``state`` plus one question with its labelled options
+  (letters ``A.``, ``B.``, ... by default; with ``options.label_style =
+  "option-text"`` or in sequence mode, each option is shown by its own name);
 - the assistant turn is opened, so the next token *is* the answer label. The
   readout position is the last token of the sequence (the end of the template's
   assistant-start marker): its logits are the distribution over that label.
@@ -29,6 +31,7 @@ __all__ = [
     "CompiledPrompt",
     "compile_question",
     "compile_request",
+    "names_options",
     "option_labels",
     "question_options",
     "render_state",
@@ -53,13 +56,22 @@ def question_options(question: QuestionT) -> tuple[str, ...]:
     return tuple(str(i) for i in range(len(question.criteria)))
 
 
-def option_labels(question: QuestionT, readout: str = "first-token") -> tuple[str, ...]:
+def names_options(readout: str = "first-token", label_style: str = "letters") -> bool:
+    """True when options are shown and answered by their own text rather than by
+    letter: always in sequence mode, and in first-token mode with
+    ``label_style = "option-text"`` (story 1.8)."""
+    return readout == "sequence" or label_style == "option-text"
+
+
+def option_labels(
+    question: QuestionT, readout: str = "first-token", label_style: str = "letters"
+) -> tuple[str, ...]:
     """The label the model emits for each option: Yes/No for ``noul``; otherwise
-    letters A..Z in first-token mode, or the option text itself (criteria key or
-    level) in sequence mode."""
+    letters A..Z, or the option text itself (criteria key or level) in sequence
+    mode or with ``label_style = "option-text"``."""
     if isinstance(question, NoulQuestion):
         return NOUL_LABELS
-    if readout == "sequence":
+    if names_options(readout, label_style):
         return tuple(question.criteria)  # choice: the names; score: the levels
     n = len(question_options(question))
     if n > len(LETTER_LABELS):
@@ -85,11 +97,15 @@ def render_user_turn(
     labels: Sequence[str] | None = None,
     order: Sequence[int] | None = None,
     readout: str = "first-token",
+    label_style: str = "letters",
 ) -> str:
     """The user turn for one question. ``order`` lists option indices in display
     order (default: declared order); ``labels[k]`` labels the k-th displayed option.
-    In sequence mode options are bulleted and answered by their own text."""
-    labels = tuple(labels) if labels is not None else option_labels(question, readout)
+    In sequence mode, and with ``label_style = "option-text"``, options are
+    bulleted and answered by their own text (the two render identically)."""
+    if labels is None:
+        labels = option_labels(question, readout, label_style)
+    labels = tuple(labels)
     lines = ["State:", render_state(state), "", f"Question: {question.instructions}", ""]
     if isinstance(question, NoulQuestion):
         lines.append(f"Answer {labels[0]} or {labels[1]} only.")
@@ -106,7 +122,7 @@ def render_user_turn(
     order = tuple(order) if order is not None else tuple(range(len(entries)))
     if sorted(order) != list(range(len(entries))):
         raise PromptError(f"order {order} is not a permutation of {len(entries)} options")
-    if readout == "sequence":
+    if names_options(readout, label_style):
         lines.extend(f"- {entries[i]}" for i in order)
         lines += ["", f"Answer with one {noun} exactly as written."]
         return "\n".join(lines)
@@ -120,7 +136,8 @@ class CompiledPrompt:
     """One question's prompt. ``tokens[:prefix_len]`` is the cacheable system turn;
     ``readout_position`` indexes the token whose logits pick the label.
 
-    ``labels[k]`` is the label shown for ``options[order[k]]``."""
+    ``labels[k]`` is the label shown for ``options[order[k]]``. ``label_style`` is
+    ``"letters"`` or ``"option-text"`` (meaningful in first-token mode only)."""
 
     name: str
     question: QuestionT
@@ -132,6 +149,7 @@ class CompiledPrompt:
     labels: tuple[str, ...]
     order: tuple[int, ...]
     readout: str = "first-token"
+    label_style: str = "letters"
 
     @property
     def prefix_tokens(self) -> tuple[int, ...]:
@@ -149,19 +167,21 @@ def compile_question(
     tokenize: Tokenize,
     order: Sequence[int] | None = None,
     readout: str | None = None,
+    label_style: str | None = None,
 ) -> CompiledPrompt:
-    """Render and tokenize one question of ``request``. ``readout`` defaults to
-    ``request.options.readout``."""
+    """Render and tokenize one question of ``request``. ``readout`` and
+    ``label_style`` default to ``request.options``."""
     question = request.questions[name]
     readout = readout or request.effective_options.readout
+    label_style = label_style or request.effective_options.label_style
     options = question_options(question)
-    labels = option_labels(question, readout)
+    labels = option_labels(question, readout, label_style)
     if isinstance(question, NoulQuestion):
         order = (0, 1)  # the Yes/No pair is fixed, never permuted
     order = tuple(order) if order is not None else tuple(range(len(options)))
-    if readout == "sequence":  # labels are the option texts, so they follow the order
-        labels = tuple(labels[i] for i in order)
-    user = render_user_turn(request.state, question, labels, order, readout)
+    if not isinstance(question, NoulQuestion) and names_options(readout, label_style):
+        labels = tuple(labels[i] for i in order)  # labels are the texts: they follow the order
+    user = render_user_turn(request.state, question, labels, order, readout, label_style)
     chat = template.render(request.prefix, user)
     tokens = tuple(tokenize(chat.text))
     prefix_len = 0
@@ -186,6 +206,7 @@ def compile_question(
         labels=labels,
         order=order,
         readout=readout,
+        label_style=label_style,
     )
 
 

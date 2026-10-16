@@ -79,6 +79,7 @@ class RequestOptions(ClosedModel):
     permutations: int = Field(default=1, ge=1, le=8)
     calibrated: bool = True
     readout: Literal["first-token", "sequence"] = "first-token"
+    label_style: Literal["letters", "option-text"] = "letters"
     debug: bool = False
 
 

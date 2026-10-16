@@ -28,7 +28,11 @@ curl -s localhost:8080/v1/systemone -H 'content-type: application/json' -d '{
   answers **422** with `{"detail": ..., "errors": [{"loc", "msg", "type"}]}`,
   where `loc` is the dotted field path (`options.permutations`,
   `questions.department.choice.criteria`; the union member name is part of a
-  question's path).
+  question's path). `options` pass through to `decide` unchanged, including
+  `options.label_style` (story [1.8](../stories/1-8-option-text-labels-wire-option.md));
+  an option-text name that is not one token answers 422 the same way. The
+  calibration temperature is keyed by `(model, readout)` only, so an
+  option-text request uses the first-token temperature.
 - `POST /v1/chat/completions` — a thin, non-streaming OpenAI-style chat
   completion on the same weights (`messages`, `max_tokens`, `temperature`;
   `usage.prompt_tokens_details.cached_tokens`). It exists to prove the

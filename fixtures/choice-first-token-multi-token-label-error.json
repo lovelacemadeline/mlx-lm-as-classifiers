@@ -56,7 +56,7 @@
     },
     "error": {
       "type": "LabelTokenizationError",
-      "message": "labels are not single tokens: 'chargeback' -> 2 tokens [10690, 1942]; use options.readout = \"sequence\", or labels that are single tokens"
+      "message": "labels are not single tokens: 'chargeback' -> 2 tokens [10690, 1942]; use options.readout = \"sequence\", or options.label_style = \"letters\" (or option names that are single tokens)"
     }
   },
   "generator": {

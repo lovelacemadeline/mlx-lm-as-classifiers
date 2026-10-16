@@ -110,6 +110,9 @@ def test_case_validation():
         FixtureCase("x", "", {"state": "s", "questions": {}})
     with pytest.raises(ValueError, match="needs a request prefix"):
         FixtureCase("x", "", {"state": "s", "questions": {"q": {}}}, prefix_cached=True)
+    with pytest.raises(ValueError, match="disagrees with label_style"):
+        req = {"state": "s", "questions": {"q": {}}, "options": {"label_style": "option-text"}}
+        FixtureCase("x", "", req)
 
 
 def test_committed_fixtures_are_the_seed_set_on_gemma():

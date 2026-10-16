@@ -76,6 +76,12 @@ def decide(
     Sequence mode: each prompt caches itself and scores every option with one
     small pass (:mod:`mlx_classifiers.sequence`).
 
+    ``options.label_style`` picks the first-token labels: ``"letters"`` (default,
+    ``A.``, ``B.``, ...) or ``"option-text"``, which shows each ``choice``/``score``
+    option by name, asks for the name, and binds the names themselves as
+    first-token labels (story 1.8; a name that is not one token in context is a
+    :class:`~mlx_classifiers.errors.LabelTokenizationError`). ``noul`` keeps Yes/No.
+
     ``options.permutations = N`` compiles each ``choice`` question N times with
     the option order permuted (:func:`permutation_orders`), labels re-bound per
     ordering, and returns the mean of the N distributions (raw and calibrated
