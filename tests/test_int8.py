@@ -4,9 +4,12 @@ one real E2B layer, and fixture parity INT8 on vs off on the real Gemma 4 E2B.
 Tolerance (measured 2026-10-16, M5, low power mode on): over the committed
 fixtures INT8 moves raw probabilities by at most 1.44e-3 and raw logits by at
 most 0.5 (bf16 steps); at 0.5k to 4k-token prompts by at most 1.6e-3 and 0.75.
-``PROB_TOL`` gives about 3x headroom over the worst measured case and is still
+``PROB_TOL`` gave about 3x headroom over the worst measured case and is still
 under 1% of the smallest top-1 margin in the fixtures (0.934), so it cannot hide
 an argmax flip; ``LOGIT_TOL`` matches the cross-path bf16 noise of story 2.5.
+Story 2.9 (2026-10-16, low power off): with the stock linears freed, the readout row
+and short sequence spans run on the int8 weights too, and the worst case is 3.38e-3
+(``score-sequence-object-state``) and 0.75 in logits.
 """
 
 from __future__ import annotations
@@ -40,6 +43,18 @@ needs_gemma = pytest.mark.skipif(
 )
 
 
+def _m5() -> bool:
+    try:
+        from mlx_classifiers import moe
+    except ImportError:
+        return False
+    return moe.available()
+
+
+# the W8A8 kernels need Metal 4 MPP matmul2d on an M5-class GPU (as story 2.8's do)
+needs_m5 = pytest.mark.skipif(not _m5(), reason="needs MLX 0.32 on an M5 GPU")
+
+
 def test_bench_int8_column_follows_the_runner_flag():
     runner = FakeRunner()
     assert {r.int8 for r in run_bench(runner, lengths=[16], reps=1, warmup=0)} == {False}
@@ -70,22 +85,71 @@ def test_load_patches_every_mlp_and_projection(int8_runner):
     proj = [getattr(lay.self_attn, n) for lay in layers for n in names if hasattr(lay.self_attn, n)]
     assert len(mlp) == 105 and len(proj) == 100  # 15 producers x 4 + 20 KV-shared x 2
     assert all(isinstance(m, Int8LinearW8A8) for m in mlp + proj)
+    assert not any("orig" in m for m in mlp + proj)  # story 2.9: no stock copy kept
+
+
+def _stock_and_wrapper(n, k, bits, seed=0):
+    import mlx.core as mx
+    from mlx import nn
+
+    from mlx_classifiers.int8 import Int8LinearW8A8
+
+    lin = nn.Linear(k, n, bias=False)
+    lin.weight = mx.random.normal((n, k), key=mx.random.key(seed)) * 0.02
+    q = nn.QuantizedLinear.from_linear(lin, group_size=64, bits=bits)
+    return q, Int8LinearW8A8(q)
+
+
+@needs_m5
+@pytest.mark.parametrize(("n", "k", "bits"), [(6144, 1536, 8), (2112, 2816, 8), (256, 1536, 4)])
+def test_small_rows_run_on_the_int8_weights(n, k, bits):
+    """Story 2.9: up to GEMV_MAX_ROWS rows the wrapper is the int8 weights times the
+    bf16 activations (fp32 accumulation, one bf16 rounding); 9..63 rows take the padded
+    int8 GEMM. Every row count stays within 5% (of the max) of the stock linear."""
+    import mlx.core as mx
+
+    from mlx_classifiers.int8 import wiring
+
+    q, w = _stock_and_wrapper(n, k, bits)
+    assert "orig" not in w
+    deq = w._wq.astype(mx.float32) * w._ws[:, None]
+    for rows in (1, 3, wiring.GEMV_MAX_ROWS, wiring.GEMV_MAX_ROWS + 1, 63, 64, 200):
+        x = mx.random.normal((1, rows, k), key=mx.random.key(rows)).astype(mx.bfloat16)
+        out, ref = w(x), q(x)
+        assert out.dtype == mx.bfloat16 and out.shape == ref.shape
+        o32, r32 = out.astype(mx.float32), ref.astype(mx.float32)
+        assert 0 < (mx.abs(o32 - r32).max() / mx.abs(r32).max()).item() < 0.05
+        if rows <= wiring.GEMV_MAX_ROWS:
+            exact = mx.matmul(x[0].astype(mx.float32), deq.T, stream=mx.cpu)
+            # one bf16 rounding of the output: within 2^-8 of each value
+            assert (mx.abs(o32[0] - exact) <= mx.abs(exact) * 2**-8 + 1e-6).all().item()
 
 
 @pytest.mark.mlx
 @needs_gemma
 def test_wrapper_keeps_bf16_and_falls_back_under_64_rows(int8_runner):
+    """The real E2B wrapper: bf16 out at every row count, the int8 GEMM at 64 rows and
+    over, and (story 2.9) the int8 weights below that, with the stock linear freed.
+    Layer 0's stock copy is gone, so the stock reference is rebuilt from the
+    checkpoint file."""
     import mlx.core as mx
+    from mlx import nn
 
     w = int8_runner.model.language_model.model.layers[0].mlp.gate_proj
+    assert "orig" not in w
+    key = "language_model.model.layers.0.mlp.gate_proj"
+    snap = next(_SNAP.glob("*/model.safetensors"))
+    t = mx.load(str(snap))
+    ref = nn.QuantizedLinear(w._K, w._N, bias=False, group_size=64, bits=8)
+    ref.weight, ref.scales, ref.biases = (t[f"{key}.{a}"] for a in ("weight", "scales", "biases"))
+    del t
     mx.random.seed(0)
     long = mx.random.normal((1, 200, w._K)).astype(mx.bfloat16)
-    out, ref = w(long), w.orig(long)
-    assert out.dtype == mx.bfloat16 and out.shape == ref.shape
-    rel = mx.abs(out.astype(mx.float32) - ref.astype(mx.float32)).max() / mx.abs(ref).max()
-    assert 0 < rel.item() < 0.05  # the int8 lane ran, and is close
-    short = long[:, :63]
-    assert mx.array_equal(w(short), w.orig(short)).item()  # stock below 64 rows
+    for x in (long, long[:, :63], long[:, :1]):
+        out, want = w(x), ref(x)
+        assert out.dtype == mx.bfloat16 and out.shape == want.shape
+        diff = mx.abs(out.astype(mx.float32) - want.astype(mx.float32)).max()
+        assert 0 < (diff / mx.abs(want).max()).item() < 0.05  # int8 ran, and is close
 
 
 @pytest.mark.mlx

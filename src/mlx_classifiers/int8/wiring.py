@@ -7,8 +7,17 @@
 # `patch_model` applies both patches. Run on Gemma 4 E2B (35 layers; layers
 # 15..34 are KV-shared and have no k_proj/v_proj, which `patch_projs` already
 # skips via hasattr). Needs Apple M5 / Metal 4 (MPP matmul2d cooperative tensors).
+# Story 2.9 (2026-10-16) changed the small-row path and the patch entry points: the
+# wrapper no longer keeps the stock linear. Calls of <= GEMV_MAX_ROWS rows (the L=1
+# readout) run `_gemv_int8`, a GEMV over the int8 weights dequantised on the fly
+# (bf16 activations, fp32 accumulation); 9..63 rows are zero-padded to 64 and take
+# the int8 GEMM. `patch_mlps`/`patch_projs` only wrap linears the kernels can serve
+# (`_eligible`) and `patch_model` frees the dropped stock weights (`mx.clear_cache`).
+# The int8 weight is stored (N, K) and the GEMM reads it with transpose_right
+# (bit-equal output to the (K, N) original), and the requantisation runs in mx
+# instead of numpy (bit-equal weights). The GEMM's numerics, the row quantiser and
+# the 5.21 dtype fix are the source's; formatting is off to keep it diffable.
 # ruff: noqa
-# Kept byte-for-byte with the source below this header, so formatting is off.
 # fmt: off
 """W8A8 dense-MLP + attention-projection wiring for Gemma4 MoE prefill.
 
@@ -32,6 +41,8 @@ Scheme:
     multiple of 32, or N not a multiple of 64) fall back to the ORIGINAL
     (stock quantized) linear -- this is what keeps decode-time behavior/
     accuracy untouched; only prefill-shaped calls take the int8 fast lane.
+    [mlx-classifiers story 2.9: no longer. Misaligned linears are not wrapped,
+    and short calls run on the int8 weights; see the header above.]
 
 Known gotcha (int8-mlx story 5.21, "the +1160ms dtype-promotion autopsy"):
   MLX promotes `bf16 (+|*) fp16 -> float32`. The GEMM kernel's epilogue
@@ -48,7 +59,6 @@ This module intentionally has NO import of anything under
 /Users/maddie/Documents/dev/2026/july/int8-mlx -- it is a clean, decoupled
 port so the two repos stay independent.
 """
-import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
 
@@ -79,10 +89,11 @@ def _make_kernel(name):
       ct_a{i}.load(sA{i});""")
     for j in range(TN):
         decls.append(f"auto ct_b{j} = op.get_right_input_cooperative_tensor<int8_t, int8_t, int>();")
+        # story 2.9: B is the (N, K) int8 weight, read transposed (was (K, N))
         loads_b.append(f"""
-      tensor<device int8_t, extents<int32_t, SN, SK>, tensor_inline> sB{j}(
-          (device int8_t*)(B + (size_t)k * N + col + {j} * SN),
-          extents<int32_t, SN, SK>(), array<int32_t, 2>{{1, N}});
+      tensor<device int8_t, extents<int32_t, SK, SN>, tensor_inline> sB{j}(
+          (device int8_t*)(B + (size_t)(col + {j} * SN) * K + k),
+          extents<int32_t, SK, SN>(), array<int32_t, 2>{{1, K}});
       ct_b{j}.load(sB{j});""")
     for i in range(TM):
         for j in range(TN):
@@ -114,7 +125,7 @@ def _make_kernel(name):
     const int col = tgy * SN * {TN};
 
     constexpr auto desc = matmul2d_descriptor(
-        SM, SN, SK, false, false, true,
+        SM, SN, SK, false, true, true,
         matmul2d_descriptor::mode::multiply_accumulate);
     matmul2d<desc, execution_simdgroup> op;
 
@@ -137,7 +148,7 @@ def _make_kernel(name):
     )
 
 
-_KERNEL = _make_kernel("int8_linear_epilogue_w8a8opt")   # distinct cache name from int8-mlx
+_KERNEL = _make_kernel("int8_linear_epilogue_w8a8opt_nk")   # distinct cache name from int8-mlx
 ROW_ALIGN = SM * TM  # 64
 
 
@@ -213,42 +224,114 @@ def _rowquant_int8(x):
     return codes, scales
 
 
+
+# ============================================================================
+# Metal kernel: small-row GEMV over the int8 weights (story 2.9)
+# y[m, n] = ws[n] * sum_k x[m, k] * wq[n, k]: x in its own dtype, fp32 accumulate,
+# output in x's dtype. One simdgroup owns _GEMV_R output rows; each lane reads 16
+# contiguous int8 of each row per step (a simdgroup covers 512 of K), then
+# simd_sum. The same (N, K) bytes the GEMM reads, so no second copy.
+# ============================================================================
+GEMV_MAX_ROWS = 8     # calls of up to this many rows take the GEMV; 9..63 are padded
+_GEMV_R = 2           # output rows per simdgroup
+_GEMV_SGS = 4         # simdgroups per threadgroup
+
+_GEMV_SRC = f"""
+    constexpr int MMAX = {GEMV_MAX_ROWS}, R = {_GEMV_R}, SGS = {_GEMV_SGS};
+    const int M = int(dims[0]);
+    const int N = int(dims[1]);
+    const int K = int(dims[2]);
+    const int lane = int(thread_index_in_simdgroup);
+    const int n0 = (int(threadgroup_position_in_grid.x) * SGS
+                    + int(simdgroup_index_in_threadgroup)) * R;
+    if (n0 >= N) return;            // whole simdgroup: n0 is per simdgroup
+
+    float acc[MMAX][R];
+    for (int m = 0; m < MMAX; ++m) for (int r = 0; r < R; ++r) acc[m][r] = 0.0f;
+    for (int k = lane * 16; k < K; k += 512) {{
+      float4 w[R][4];
+      for (int r = 0; r < R; ++r) {{
+        const device char4* wp = (const device char4*)(W + (size_t)(n0 + r) * K + k);
+        for (int i = 0; i < 4; ++i) w[r][i] = float4(wp[i]);
+      }}
+      for (int m = 0; m < M; ++m) {{
+        const device auto* xp = x + (size_t)m * K + k;
+        for (int i = 0; i < 4; ++i) {{
+          const float4 xv = float4(float(xp[4 * i]), float(xp[4 * i + 1]),
+                                   float(xp[4 * i + 2]), float(xp[4 * i + 3]));
+          for (int r = 0; r < R; ++r) acc[m][r] += dot(xv, w[r][i]);
+        }}
+      }}
+    }}
+    for (int m = 0; m < M; ++m) {{
+      for (int r = 0; r < R; ++r) {{
+        const float t = simd_sum(acc[m][r]);
+        if (lane == 0) D[(size_t)m * N + n0 + r] = static_cast<T>(t * ws[n0 + r]);
+      }}
+    }}
+"""
+
+_GEMV_KERNEL = mx.fast.metal_kernel(
+    name="mlx_classifiers_int8_gemv_nk",
+    input_names=["x", "W", "ws", "dims"],
+    output_names=["D"],
+    source=_GEMV_SRC,
+)
+
+
+def _gemv_int8(x, wq, ws, N, K):
+    """x (M <= GEMV_MAX_ROWS, K) -> (M, N) in x's dtype, on the (N, K) int8 weights.
+    Needs N % (_GEMV_R * _GEMV_SGS) == 0 and K % 16 == 0 (`_eligible` implies both)."""
+    M = x.shape[0]
+    (d,) = _GEMV_KERNEL(
+        inputs=[x, wq, ws, mx.array([M, N, K], mx.uint32)],
+        template=[("T", x.dtype)],
+        output_shapes=[(M, N)],
+        output_dtypes=[x.dtype],
+        grid=(N // _GEMV_R * 32, 1, 1),
+        threadgroup=(32 * _GEMV_SGS, 1, 1),
+    )
+    return d
+
 # ============================================================================
 # W8A8 linear wrapper
 # ============================================================================
 class Int8LinearW8A8(nn.Module):
-    """W8A8 wrapper: fast int8 GEMM path for prefill-shaped inputs,
-    falls back to the original (stock-quantized) linear otherwise.
+    """W8A8 wrapper: fast int8 GEMM path for prefill-shaped inputs; up to
+    GEMV_MAX_ROWS rows run a GEMV on the same int8 weights (story 2.9). The
+    stock linear is not kept: only build this from an `_eligible` linear.
     """
 
     def __init__(self, orig):
         super().__init__()
-        self.orig = orig
         # dequantize QAT weight -> fp32 (N, K), then per-output-channel
-        # (per row of N) symmetric int8, pre-transposed to (K, N).
-        w = mx.dequantize(orig.weight, orig.scales, orig.biases,
-                          group_size=orig.group_size, bits=orig.bits)
-        wf = np.array(w.astype(mx.float32))
-        amax = np.maximum(np.abs(wf).max(axis=1), 1e-8)
-        ws = (amax / 127.0).astype(np.float32)              # (N,)
-        wq = np.clip(np.round(wf / ws[:, None]), -127, 127).astype(np.int8)
-        self._wq_t = mx.array(np.ascontiguousarray(wq.T))   # (K, N) int8
-        self._ws = mx.array(ws)                              # (N,)
+        # (per row of N) symmetric int8, kept (N, K) (story 2.9: the GEMM reads it
+        # transposed and the small-row GEMV reads its rows; was pre-transposed).
+        # Story 2.9: the same fp32 ops in mx on the GPU instead of numpy (bit-equal
+        # int8 weights and scales on all 205 E2B linears; no host-side fp32 copies).
+        wf = mx.dequantize(orig.weight, orig.scales, orig.biases,
+                           group_size=orig.group_size, bits=orig.bits).astype(mx.float32)
+        ws = mx.maximum(mx.abs(wf).max(axis=1), 1e-8) / 127.0       # (N,) fp32
+        wq = mx.clip(mx.round(wf / ws[:, None]), -127, 127).astype(mx.int8)
+        mx.eval(wq, ws)
+        self._wq = wq                                        # (N, K) int8
+        self._ws = ws                                        # (N,)
         self._N, self._K = wf.shape
 
     def __call__(self, x):
         orig_shape = x.shape
         xm = x.reshape(-1, self._K)
         M = xm.shape[0]
-        if M < ROW_ALIGN or (self._K % 32) or (self._N % 64):
-            return self.orig(x)
+        if M <= GEMV_MAX_ROWS:
+            out = _gemv_int8(xm, self._wq, self._ws, self._N, self._K)
+            return out.reshape(*orig_shape[:-1], self._N)
         pad = (-M) % ROW_ALIGN
         if pad:
             xm = mx.concatenate([xm, mx.zeros((pad, self._K), dtype=xm.dtype)])
         Mp = xm.shape[0]
         # dynamic per-token symmetric int8 (fused single-pass kernel)
         codes, s = _rowquant_int8(xm.astype(mx.float16))
-        out = _run_int8_linear(codes, self._wq_t, s, self._ws, Mp, self._N, self._K)
+        out = _run_int8_linear(codes, self._wq, s, self._ws, Mp, self._N, self._K)
         if pad:
             out = out[:M]
         # story 5.21 fix: cast fp16 kernel output back to the INPUT's dtype
@@ -266,6 +349,17 @@ def _decoder_layers(model):
     return getattr(model, "language_model", model).model.layers
 
 
+def _eligible(lin):
+    """A quantized linear without bias whose dims the kernels take (K % 32, N % 64);
+    anything else stays stock (story 2.9: the wrapper has no stock fallback)."""
+    if not isinstance(lin, nn.QuantizedLinear) or "bias" in lin:
+        return False
+    if getattr(lin, "mode", "affine") != "affine":
+        return False
+    N, K = lin.weight.shape[0], lin.weight.shape[1] * 32 // lin.bits
+    return K % 32 == 0 and N % 64 == 0
+
+
 def patch_mlps(model):
     """Replace every decoder layer's dense mlp.{gate,up,down}_proj with the
     W8A8 wrapper. Experts (MoE) are left untouched (stock 4-bit QAT)."""
@@ -274,8 +368,9 @@ def patch_mlps(model):
         mlp = layer.mlp
         for name in ("gate_proj", "up_proj", "down_proj"):
             orig = getattr(mlp, name)
-            setattr(mlp, name, Int8LinearW8A8(orig))
-            n += 1
+            if _eligible(orig):
+                setattr(mlp, name, Int8LinearW8A8(orig))
+                n += 1
     return n
 
 
@@ -287,12 +382,16 @@ def patch_projs(model):
     for layer in _decoder_layers(model):
         attn = layer.self_attn
         for name in ("q_proj", "k_proj", "v_proj", "o_proj"):
-            if hasattr(attn, name):
+            if hasattr(attn, name) and _eligible(getattr(attn, name)):
                 setattr(attn, name, Int8LinearW8A8(getattr(attn, name)))
                 n += 1
     return n
 
 
 def patch_model(model):
-    """Apply :func:`patch_mlps` then :func:`patch_projs`; return ``(n_mlp, n_proj)``."""
-    return patch_mlps(model), patch_projs(model)
+    """Apply :func:`patch_mlps` then :func:`patch_projs`; return ``(n_mlp, n_proj)``.
+    The replaced stock linears are unreferenced once swapped; their buffers are
+    returned to the OS here rather than left in MLX's cache (story 2.9)."""
+    out = patch_mlps(model), patch_projs(model)
+    mx.clear_cache()
+    return out

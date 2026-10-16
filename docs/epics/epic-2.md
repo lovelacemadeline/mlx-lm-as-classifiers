@@ -30,7 +30,7 @@ KV-consumer layers, so the readout must run them on the readout row only
 | 2.6 | INT8 attention router with proper Q-side length padding | pending |
 | 2.7 | Bounded-context mode — window the global layers with the rules prefix pinned as sinks | pending |
 | 2.8 | MoE expert INT8 for the 26B — vendor the W4A8 expert gather-GEMM (ling3-mlx kernel, int8-mlx affine fold) | completed |
-| 2.9 | Memory budget — stop keeping two copies of INT8-patched weights, then quantise the KV store | pending |
+| 2.9 | Memory budget — stop keeping two copies of INT8-patched weights, then quantise the KV store | in-progress |
 
 ## Related
 - ADR-0002 (the runner interface is the port seam)

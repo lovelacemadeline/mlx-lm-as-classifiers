@@ -21,7 +21,8 @@
 :func:`patch_experts` swaps every eligible ``SwitchGLU`` (4-bit affine, group 64,
 no bias, 64-aligned dims) for :class:`Int8SwitchGLU`, whose three projections are
 :class:`Int8SwitchLinear`: the checkpoint's nibbles XOR'd to signed ``int4b``
-(same bytes), scales and ``b + 8s`` transposed to ``(E, K/64, N)`` fp32. The
+(same bytes), scales and biases transposed to ``(E, K/64, N)`` (``b + 8s`` is formed
+in the kernel, story 2.9). The
 stock weights are dropped, so this **replaces** the expert path at every row
 count, including the L=1 readout, and :mod:`mlx_classifiers.moe`'s bit-identical
 kernel (which needs the stock encoding) no longer applies to that model.
@@ -114,7 +115,8 @@ def _kernel(sm: int = SM) -> Any:
         const int c = col + mi[0];
         const size_t si = Sbase + (size_t)g * N + c;
         const float rs = (float)RS[(size_t)(row0 + mi[1]) * NG + g];
-        acc[i] += (float)ct_c[i] * S[si] + BETA[si] * rs;
+        const float sc = (float)S[si];
+        acc[i] += (float)ct_c[i] * sc + ((float)BIAS[si] + 8.0f * sc) * rs;
         ct_c.set(i, 0);
       }}
     }}
@@ -129,7 +131,7 @@ def _kernel(sm: int = SM) -> Any:
     """
     return mx.fast.metal_kernel(
         name=f"mlx_classifiers_w4a8_affine_gather_sm{sm}",
-        input_names=["A", "B", "S", "BETA", "a_scale", "RS", "tile_expert", "tile_row0"]
+        input_names=["A", "B", "S", "BIAS", "a_scale", "RS", "tile_expert", "tile_row0"]
         + ["tile_nrows", "dims"],
         output_names=["D"],
         header=_HEADER,
@@ -250,7 +252,7 @@ def gather_gemm(aq: Any, a_s: Any, a_rs: Any, lin: Int8SwitchLinear, tiles: tupl
     te, tr, tn, maxt = tiles
     n, k = lin.output_dims, lin.input_dims
     (d,) = _kernel(SM)(
-        inputs=[aq, lin.w4, lin.s, lin.beta, a_s, a_rs, te, tr, tn, mx.array([n, k], mx.uint32)],
+        inputs=[aq, lin.w4, lin.s, lin.b, a_s, a_rs, te, tr, tn, mx.array([n, k], mx.uint32)],
         output_shapes=[(aq.shape[0], n)],
         output_dtypes=[mx.bfloat16],
         grid=(maxt * THREADS, n // SN, 1),
@@ -261,19 +263,21 @@ def gather_gemm(aq: Any, a_s: Any, a_rs: Any, lin: Int8SwitchLinear, tiles: tupl
 
 class Int8SwitchLinear(nn.Module):
     """One expert projection in kernel form, built from a ``QuantizedSwitchLinear``
-    (4-bit affine, group 64): signed-nibble weights (same bytes), fp32 scales and
-    ``b + 8s``, both (E, K/64, N). The stock arrays are not kept."""
+    (4-bit affine, group 64): signed-nibble weights (same bytes), the checkpoint's
+    scales and biases in their own dtype, both transposed to (E, K/64, N). The kernel
+    forms ``b + 8s`` in fp32 per group (exact: ``8s`` is a power-of-two scaling, so
+    the sum rounds once, as the fp32 precompute of story 2.8 did; story 2.9 dropped
+    that precompute, which doubled the fold operands to fp32). The stock arrays are
+    not kept."""
 
     def __init__(self, orig: QuantizedSwitchLinear):
         super().__init__()
         self.num_experts = orig.num_experts
         self.input_dims, self.output_dims = orig.input_dims, orig.output_dims
-        s = orig["scales"].astype(mx.float32)
-        b = orig["biases"].astype(mx.float32)
         self.w4 = orig["weight"] ^ mx.array(_XOR, mx.uint32)
-        self.s = mx.contiguous(mx.swapaxes(s, 1, 2))
-        self.beta = mx.contiguous(mx.swapaxes(b + 8.0 * s, 1, 2))
-        mx.eval(self.w4, self.s, self.beta)
+        self.s = mx.contiguous(mx.swapaxes(orig["scales"], 1, 2))
+        self.b = mx.contiguous(mx.swapaxes(orig["biases"], 1, 2))
+        mx.eval(self.w4, self.s, self.b)
 
 
 class Int8SwitchGLU(SwitchGLU):
@@ -318,8 +322,9 @@ def _eligible(lin: Any) -> bool:
 
 def patch_experts(model: Any) -> int:
     """Swap every eligible ``SwitchGLU`` in ``model`` for :class:`Int8SwitchGLU`,
-    converting its projections in place (stock expert weights released). Returns
-    the number swapped; 0 on a dense model."""
+    converting its projections in place (stock expert weights released, and their
+    buffers returned by ``mx.clear_cache``, story 2.9). Returns the number swapped;
+    0 on a dense model."""
     targets = [
         m
         for _, m in model.named_modules()
@@ -331,4 +336,5 @@ def patch_experts(model: Any) -> int:
         for name in ("up_proj", "gate_proj", "down_proj"):
             setattr(m, name, Int8SwitchLinear(getattr(m, name)))
         m.__class__ = Int8SwitchGLU
+    mx.clear_cache()
     return len(targets)

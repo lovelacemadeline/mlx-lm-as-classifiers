@@ -61,9 +61,10 @@ which runs prefill chunks of 4 to 16 rows per expert (64 to 256 tokens on the
 
 INT8 (story 2.3): ``MLXRunner.load(repo, int8=True)`` swaps every decoder
 layer's MLP and attention projections for the vendored W8A8 kernel
-(:mod:`mlx_classifiers.int8`, Apple M5 / Metal 4 only). Calls under 64 rows
-fall back to the stock linear inside the wrapper, so the L=1 readout pass is
-stock either way; the cache-only prefill is where INT8 engages.
+(:mod:`mlx_classifiers.int8`, Apple M5 / Metal 4 only). The stock linears are
+freed (story 2.9): calls of up to 8 rows (the L=1 readout pass) run a GEMV on the
+int8 weights with bf16 activations, 9 to 63 rows are padded into the int8 GEMM,
+and the cache-only prefill is where the int8 GEMM does most of its work.
 
 Images (story 6.3)
 ------------------
@@ -98,7 +99,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import itertools
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -283,25 +284,31 @@ class MLXRunner:
         moe_kernel: bool = True,
         int8_experts: bool = True,
         vision: bool = False,
+        on_stage: Callable[[str, Any], None] | None = None,
         **kwargs: Any,
     ) -> MLXRunner:
         """Load ``repo`` with mlx-lm. ``int8=True`` then applies the W8A8 ``patch_mlps``
-        and ``patch_projs`` (dequantise the checkpoint, requantise per output channel;
-        it keeps the stock linears for the short-row fallback, so resident memory grows,
-        about 3.4 to 5.2 GB on E2B). ``moe_kernel`` (default on) applies
+        and ``patch_projs`` (dequantise the checkpoint, requantise per output channel,
+        free the stock linears; story 2.9). ``moe_kernel`` (default on) applies
         :func:`mlx_classifiers.moe.patch_model` (story 3.6; bit-identical). On a MoE,
         ``int8`` with ``int8_experts`` (default) also runs the experts W4A8 (story 2.8),
         which supersedes the 3.6 kernel on that model.
 
         A checkpoint with a vision tower gets ``image_tokens`` from its JSON
         (story 6.1); the vision weights load on the first image, or now with
-        ``vision=True`` (story 6.3)."""
+        ``vision=True`` (story 6.3).
+
+        ``on_stage(name, model)``, if given, is called after each loading stage
+        (``"base weights"``, ``"int8 patch"`` when ``int8``, ``"vision tower"`` when
+        ``vision``), for the memory audit (story 2.9)."""
         import json
 
         from mlx_lm import load
         from mlx_lm.utils import _download
 
+        stage = on_stage or (lambda name, model: None)
         model, tokenizer = load(repo)
+        stage("base weights", model)
         path = _download(repo)
         image_tokens = image_tokens_from_config(path)
         text_config = json.loads((path / "config.json").read_text()).get("text_config") or {}
@@ -312,6 +319,7 @@ class MLXRunner:
             patch_model(model)
             if int8_experts:
                 expert_layers = patch_experts(model)
+            stage("int8 patch", model)
         layers = 0
         if moe_kernel:
             from .moe import patch_model as patch_moe
@@ -331,6 +339,7 @@ class MLXRunner:
         )
         if vision:
             runner.load_vision()
+            stage("vision tower", model)
         return runner
 
     def load_vision(self) -> Any:

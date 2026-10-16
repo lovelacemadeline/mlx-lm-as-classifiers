@@ -37,6 +37,9 @@ its length-multiple-of-64 and batch-1 constraints. See the
   default is `int8=False`.
 - **Given** an input under 64 rows **when** a wrapper runs **then** the output is
   bit-identical to the stock linear; above it the output stays bf16.
+  *Superseded by [story 2.9](2-9-memory-budget.md):* the stock linear is no
+  longer kept. Calls of up to 8 rows run a GEMV on the int8 weights, and 9 to
+  63 rows are padded into the int8 GEMM, within 5% of stock (same test).
 - **Given** `mlx-classifiers bench --int8` **when** run **then** the int8 column
   reads `on`.
 
@@ -57,7 +60,8 @@ its length-multiple-of-64 and batch-1 constraints. See the
   wrapper keeps the stock linear for the under-64-row fallback, so the int8
   weights are added on top. Patching takes about 8.5 s at load (numpy
   requantisation). Dropping the stock copy would need a stock-equivalent
-  fallback for L=1; left for later.
+  fallback for L=1; left for later. (Done in [story 2.9](2-9-memory-budget.md):
+  3.41 GB with INT8.)
 - Where INT8 engages: the cache-only prefill and the sequence-mode readout
   span when they are 64 rows or more. The L=1 first-token readout is stock.
   `noul-sequence` (55 tokens) never reaches the int8 lane.

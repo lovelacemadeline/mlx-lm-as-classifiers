@@ -63,7 +63,7 @@ epics:
         status: completed
       - id: "2.9"
         title: Memory budget — stop keeping two copies of INT8-patched weights, then quantise the KV store
-        status: pending
+        status: in-progress
   - epic: 3
     title: Serving and calibration
     status: completed

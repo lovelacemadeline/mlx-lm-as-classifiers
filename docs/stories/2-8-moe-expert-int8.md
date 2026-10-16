@@ -223,5 +223,8 @@ A rough split from the parity probe (one decision each, same session): the
   worth it here, because the delta decisions are net faster.
 - The memory cost is +1.4 GB for the fp32 fold operands, against
   int8-mlx's +2.7 GB. bf16 `b + 8s` would halve it but round the fold.
+  ([Story 2.9](2-9-memory-budget.md) removed the cost exactly: the kernel now
+  reads the checkpoint's bf16 scales and biases and forms `b + 8s` in fp32.
+  Outputs are bit-identical.)
 - `patch_experts` only takes 4-bit affine experts with group 64. Any other
   checkpoint keeps stock experts.
