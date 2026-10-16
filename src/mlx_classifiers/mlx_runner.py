@@ -28,6 +28,12 @@ A prefix cache is the mlx-lm cache list after step 1 over the prefix tokens.
 ``prefill`` deep-copies it before extending, so a shared prefix is never
 mutated (about 0.4 ms on E2B). Gemma's sliding layers use ``RotatingKVCache``
 (window 512); prefixes longer than the window are tested.
+
+INT8 (story 2.3): ``MLXRunner.load(repo, int8=True)`` swaps every decoder
+layer's MLP and attention projections for the vendored W8A8 kernel
+(:mod:`mlx_classifiers.int8`, Apple M5 / Metal 4 only). Calls under 64 rows
+fall back to the stock linear inside the wrapper, so the L=1 readout pass is
+stock either way; the cache-only prefill is where INT8 engages.
 """
 
 from __future__ import annotations
@@ -66,6 +72,8 @@ class MLXRunner:
     model_id: str = DEFAULT_MODEL
     prefill_step: int = 2048
     chat_template: ChatTemplate = field(default=None)  # type: ignore[assignment]
+    #: True when the W8A8 INT8 kernels were patched in at load (story 2.3).
+    int8: bool = False
     #: Shapes seen by the vocab projection, for tests/profiling: (rows, hidden).
     head_calls: list[tuple[int, ...]] = field(default_factory=list)
 
@@ -77,11 +85,19 @@ class MLXRunner:
         self._lm = lm
 
     @classmethod
-    def load(cls, repo: str = DEFAULT_MODEL, **kwargs: Any) -> MLXRunner:
+    def load(cls, repo: str = DEFAULT_MODEL, *, int8: bool = False, **kwargs: Any) -> MLXRunner:
+        """Load ``repo`` with mlx-lm. ``int8=True`` then applies the W8A8 ``patch_mlps``
+        and ``patch_projs`` (dequantise the checkpoint, requantise per output channel;
+        it keeps the stock linears for the short-row fallback, so resident memory grows,
+        about 3.4 to 5.2 GB on E2B)."""
         from mlx_lm import load
 
         model, tokenizer = load(repo)
-        return cls(model=model, tokenizer=tokenizer, model_id=repo, **kwargs)
+        if int8:
+            from .int8 import patch_model
+
+            patch_model(model)
+        return cls(model=model, tokenizer=tokenizer, model_id=repo, int8=int8, **kwargs)
 
     # --- Runner protocol ---------------------------------------------------------------
 
