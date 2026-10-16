@@ -3,13 +3,13 @@
 epics:
   - epic: 1
     title: Schema and readout core (model-agnostic)
-    status: ready-for-dev
+    status: in-progress
     story_home: docs/stories/
     stories_count: 7
     stories:
       - id: "1.1"
         title: Wire schema models and validation
-        status: ready-for-dev
+        status: completed
       - id: "1.2"
         title: Runner interface and deterministic fake runner
         status: ready-for-dev

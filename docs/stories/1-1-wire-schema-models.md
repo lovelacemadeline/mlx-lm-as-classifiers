@@ -1,10 +1,17 @@
 ---
 type: story
-status: ready-for-dev
+status: completed
 title: Wire schema models and validation
 owner: maddie
 updated: 2026-10-16
-anchor: none  # not yet built; anchors added when src/mlx_classifiers/schema.py lands
+anchor:
+  - symbol: "src/mlx_classifiers/schema.py::SystemOneRequest"
+  - symbol: "src/mlx_classifiers/schema.py::SystemOneResponse"
+  - symbol: "src/mlx_classifiers/schema.py::ChoiceQuestion"
+  - test: "tests/test_schema.py::test_example_request_round_trips"
+  - test: "tests/test_schema.py::test_choice_with_one_criterion_fails_naming_field"
+  - test: "tests/test_schema.py::test_pydantic_schema_matches_json_schema_files"
+  - test: "tests/test_schema.py::test_unknown_top_level_field_rejected"
 ---
 
 # Story 1.1 — Wire schema models and validation
@@ -24,3 +31,14 @@ files are the contract; the models must round-trip them.
   present (drift tripwire between the two).
 - **Given** an unknown top-level field **when** parsed **then** it is rejected
   (`additionalProperties: false` mirrored).
+
+## Implementation notes
+- Model class names equal the `$defs` names in `schema/*.json`; the inline
+  `timing_ms` object is `Timing`, `usage` is `Usage`.
+- The drift tripwire walks both schemas structurally (required sets, property
+  sets, `additionalProperties: false`, const/enum/type, numeric and size
+  bounds), unwrapping pydantic's `anyOf [X, null]`. A companion test mutates
+  the file copy to prove the tripwire trips.
+- Optional request fields (`model`, `prefix`, `options`) can be omitted but not
+  sent as `null`, matching the file schema. `to_wire()` on a request drops
+  unset fields (exact round-trip); on a response it drops `None` fields.

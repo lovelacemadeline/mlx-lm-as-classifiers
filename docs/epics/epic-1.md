@@ -1,6 +1,6 @@
 ---
 type: epic
-status: ready-for-dev
+status: in-progress
 title: Schema and readout core (model-agnostic)
 epic: 1
 owner: maddie
@@ -19,7 +19,7 @@ is unit-tested on any machine. The real runner (Epic 2) plugs in behind the
 ## Stories
 | id | title | status |
 |---|---|---|
-| 1.1 | Wire schema models and validation | ready-for-dev |
+| 1.1 | Wire schema models and validation | completed |
 | 1.2 | Runner interface and deterministic fake runner | ready-for-dev |
 | 1.3 | Prompt compilation — chat template, prefix/state split, readout position | ready-for-dev |
 | 1.4 | Option binding and prefix-tree first-token readout | ready-for-dev |
