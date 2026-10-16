@@ -52,6 +52,13 @@ plus the chunk just added; step 1 runs its remainder chunk first so that the
 last chunk is a full ``prefill_step``), and an entry built from an empty cache
 in one chunk rewinds anywhere.
 
+MoE expert kernel (story 3.6): ``MLXRunner.load`` swaps the ``SwitchGLU`` of a
+4-bit MoE (Gemma 4 26B-A4B) to :class:`~mlx_classifiers.moe.SegmentedSwitchGLU`,
+which runs prefill chunks of 4 to 16 rows per expert (64 to 256 tokens on the
+26B) through one-expert-per-threadgroup 16-row NAX tiles instead of MLX's
+64-row tiles; bit-identical, and a no-op on dense models or without a NAX GPU.
+``moe_kernel=False`` keeps the stock path. ``moe_kernel_layers`` counts the swaps.
+
 INT8 (story 2.3): ``MLXRunner.load(repo, int8=True)`` swaps every decoder
 layer's MLP and attention projections for the vendored W8A8 kernel
 (:mod:`mlx_classifiers.int8`, Apple M5 / Metal 4 only). Calls under 64 rows
@@ -176,6 +183,8 @@ class MLXRunner:
     prompt_cache: PromptCacheStore | None = field(default_factory=PromptCacheStore)
     #: Each prefill as ``(cached_tokens, computed_tokens)``, for tests/profiling.
     prefill_calls: list[tuple[int, int]] = field(default_factory=list)
+    #: MoE layers running the per-expert kernel (story 3.6); 0 for the stock path.
+    moe_kernel_layers: int = 0
 
     def __post_init__(self) -> None:
         if self.chat_template is None:
@@ -185,11 +194,19 @@ class MLXRunner:
         self._lm = lm
 
     @classmethod
-    def load(cls, repo: str = DEFAULT_MODEL, *, int8: bool = False, **kwargs: Any) -> MLXRunner:
+    def load(
+        cls,
+        repo: str = DEFAULT_MODEL,
+        *,
+        int8: bool = False,
+        moe_kernel: bool = True,
+        **kwargs: Any,
+    ) -> MLXRunner:
         """Load ``repo`` with mlx-lm. ``int8=True`` then applies the W8A8 ``patch_mlps``
         and ``patch_projs`` (dequantise the checkpoint, requantise per output channel;
         it keeps the stock linears for the short-row fallback, so resident memory grows,
-        about 3.4 to 5.2 GB on E2B)."""
+        about 3.4 to 5.2 GB on E2B). ``moe_kernel`` (default on) applies
+        :func:`mlx_classifiers.moe.patch_model` (story 3.6; bit-identical)."""
         from mlx_lm import load
 
         model, tokenizer = load(repo)
@@ -197,7 +214,19 @@ class MLXRunner:
             from .int8 import patch_model
 
             patch_model(model)
-        return cls(model=model, tokenizer=tokenizer, model_id=repo, int8=int8, **kwargs)
+        layers = 0
+        if moe_kernel:
+            from .moe import patch_model as patch_moe
+
+            layers = patch_moe(model)
+        return cls(
+            model=model,
+            tokenizer=tokenizer,
+            model_id=repo,
+            int8=int8,
+            moe_kernel_layers=layers,
+            **kwargs,
+        )
 
     # --- Runner protocol ---------------------------------------------------------------
 

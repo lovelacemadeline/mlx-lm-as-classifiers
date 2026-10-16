@@ -63,7 +63,7 @@ epics:
         status: pending
   - epic: 3
     title: Serving and calibration
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 6
     stories:
@@ -84,7 +84,7 @@ epics:
         status: completed
       - id: "3.6"
         title: Delta cache fixed overhead — the 600 ms floor on the 26B
-        status: pending
+        status: completed
   - epic: 4
     title: Golden fixtures for the Swift + vision port
     status: completed

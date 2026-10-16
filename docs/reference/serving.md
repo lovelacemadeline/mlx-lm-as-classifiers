@@ -137,6 +137,11 @@ benefit automatically.
 - Results match the uncached path up to bf16 noise from the different
   chunking (story 3.4 measures it); golden fixtures run with the delta cache
   off because they pin a cache path.
+- On a MoE model (Gemma 4 26B-A4B) a ~100-token delta still touches every
+  expert, and that sets the per-decision floor. `MLXRunner.load` swaps the
+  experts to a per-expert kernel that is bit-identical to the stock path
+  ([3.6](../stories/3-6-delta-cache-fixed-overhead.md); `moe_kernel=False`
+  keeps the stock one).
 
 All model work runs on one dedicated worker thread (MLX arrays are bound to the
 stream of the thread that created them, so the model is loaded there too). That

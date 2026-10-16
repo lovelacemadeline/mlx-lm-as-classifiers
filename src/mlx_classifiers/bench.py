@@ -13,7 +13,8 @@ binding are done once per cell and not timed.
 Writes ``bench_runs/bench-<timestamp>.md`` and ``.json`` with the model id,
 git revision, machine and power state (macOS ``pmset``; recorded, never
 changed). The INT8 column is the runner's ``int8`` flag (story 2.3); run with
-``--int8`` to load the W8A8 kernels.
+``--int8`` to load the W8A8 kernels. The header records how many MoE layers run
+the per-expert kernel (story 3.6; ``--no-moe-kernel`` for the stock path).
 
 Delta-tail cells (story 3.4, ``--delta-tail N``): a state of ``L`` tokens whose
 last ``N`` change between consecutive decisions (a fresh filler tail per
@@ -283,6 +284,11 @@ def render_markdown(env: dict[str, Any], rows: Sequence[BenchRow]) -> str:
         f"- machine: {env['machine']} ({env['platform']})",
         f"- power: `{env['lowpowermode']}`; {env['power_source']}",
         f"- versions: {env['versions']}  timestamp: {env['timestamp']}",
+        *(
+            [f"- MoE per-expert kernel (3.6): {env['moe_kernel_layers']} layers"]
+            if "moe_kernel_layers" in env
+            else []
+        ),
         "",
         (
             "| state tok | prompt tok | prefix cached | delta tail | int8 | prefilled tok "
@@ -322,6 +328,11 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out", type=Path, default=Path("bench_runs"))
     p.add_argument("--int8", action="store_true", help="load with the W8A8 INT8 kernels (M5)")
     p.add_argument(
+        "--no-moe-kernel",
+        action="store_true",
+        help="keep MLX's stock MoE expert matmuls (story 3.6 per-expert kernel off)",
+    )
+    p.add_argument(
         "--delta-tail",
         type=int,
         nargs="+",
@@ -334,8 +345,11 @@ def add_arguments(p: argparse.ArgumentParser) -> None:
 def main(args: argparse.Namespace) -> int:
     from .mlx_runner import MLXRunner
 
-    runner = MLXRunner.load(args.model, int8=args.int8)
+    runner = MLXRunner.load(
+        args.model, int8=args.int8, moe_kernel=not getattr(args, "no_moe_kernel", False)
+    )
     env = environment(args.model)
+    env["moe_kernel_layers"] = runner.moe_kernel_layers
     rows = run_bench(
         runner, args.lengths, reps=args.reps, warmup=args.warmup, delta_tails=args.delta_tail
     )

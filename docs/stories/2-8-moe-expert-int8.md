@@ -19,6 +19,12 @@ the 26B (plugged in). Find its expert-GEMM path (sorted gather, per-expert
 W8A8), vendor it with provenance beside `int8/wiring.py`, patch the expert
 modules behind the same `int8` flag, and parity-test against the fixtures.
 
+Since [3.6](3-6-delta-cache-fixed-overhead.md), `MLXRunner.load` swaps the
+26B's `SwitchGLU` to `moe.SegmentedSwitchGLU` (bit-identical per-expert NAX
+tiles for 64 to 256-token chunks; about 300 ms of a 547 ms delta decision is
+still expert matmuls, bound by the weight loader). An INT8 expert path has to
+replace or compose with that class.
+
 ## Acceptance Criteria
 - **Given** the 26B with `int8=True` **when** the fixtures run **then** argmax
   agrees and probabilities are within the stated tolerance.

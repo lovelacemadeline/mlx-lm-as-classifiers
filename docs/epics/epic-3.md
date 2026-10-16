@@ -1,6 +1,6 @@
 ---
 type: epic
-status: in-progress
+status: completed
 title: Serving and calibration
 epic: 3
 owner: maddie
@@ -22,7 +22,7 @@ labelled decisions file and reports held-out ECE. This is what makes the Qwen
 | 3.3 | Decision log — every answer with its probabilities, for later refits | completed |
 | 3.4 | Delta prefix caching on the longest common token prefix | completed |
 | 3.5 | Chat route honours max_tokens and a per-call thinking toggle | completed |
-| 3.6 | Delta cache fixed overhead — the 600 ms floor on the 26B | pending |
+| 3.6 | Delta cache fixed overhead — the 600 ms floor on the 26B | completed |
 
 ## Related
 - [wire-schema](../reference/wire-schema.md)
