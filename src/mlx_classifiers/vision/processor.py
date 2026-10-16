@@ -12,6 +12,8 @@
 # PIL RGB image -> uint8 HWC array. Then exactly upstream's steps: bicubic resize with
 # PIL when the target differs, float32 * rescale_factor (1/255), no normalisation
 # (processor_config.json: do_normalize false), channel-first.
+# Story 6.6 (structural): the decode + resize steps are split out as ``resized_uint8``
+# so the vision_fast path can rescale on device; ``preprocess_png`` is unchanged in effect.
 """PNG bytes -> ``pixel_values`` [1, 3, H, W] float32, as Gemma 4's processor builds them."""
 
 from __future__ import annotations
@@ -22,18 +24,14 @@ import numpy as np
 
 from ..images import resized_size
 
-__all__ = ["preprocess_png"]
+__all__ = ["preprocess_png", "resized_uint8"]
 
 
-def preprocess_png(
-    data: bytes,
-    patch_size: int = 16,
-    max_soft_tokens: int = 280,
-    pooling_kernel_size: int = 3,
-    rescale_factor: float = 1 / 255,
+def resized_uint8(
+    data: bytes, patch_size: int = 16, max_soft_tokens: int = 280, pooling_kernel_size: int = 3
 ) -> np.ndarray:
-    """``[1, 3, H, W]`` float32 in [0, 1]; H and W multiples of ``patch_size *
-    pooling_kernel_size``. Needs Pillow (the ``vision`` extra)."""
+    """``[H, W, 3]`` uint8: the PNG decoded to RGB and bicubic-resized (PIL) to the
+    aspect-preserving size; H and W multiples of ``patch_size * pooling_kernel_size``."""
     from PIL import Image
 
     img = Image.open(io.BytesIO(data))
@@ -46,5 +44,18 @@ def preprocess_png(
     if (th, tw) != (height, width):
         pil = Image.fromarray(image).resize((tw, th), resample=Image.BICUBIC)
         image = np.array(pil)
+    return image
+
+
+def preprocess_png(
+    data: bytes,
+    patch_size: int = 16,
+    max_soft_tokens: int = 280,
+    pooling_kernel_size: int = 3,
+    rescale_factor: float = 1 / 255,
+) -> np.ndarray:
+    """``[1, 3, H, W]`` float32 in [0, 1]; H and W multiples of ``patch_size *
+    pooling_kernel_size``. Needs Pillow (the ``vision`` extra)."""
+    image = resized_uint8(data, patch_size, max_soft_tokens, pooling_kernel_size)
     image = image.astype(np.float32) * rescale_factor
     return np.transpose(image, (2, 0, 1))[None]

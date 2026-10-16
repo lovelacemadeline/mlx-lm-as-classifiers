@@ -43,7 +43,14 @@ class VisionTower(nn.Module):
     processor numbers. :meth:`encode_png` returns ``[N, text_hidden]`` soft tokens
     in the text model's embedding space (bf16), memoised by PNG sha256."""
 
-    def __init__(self, config: dict[str, Any], text_hidden_size: int, cache_size: int = 16):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        text_hidden_size: int,
+        cache_size: int = 16,
+        fast: bool = False,
+        compile: bool = True,
+    ):
         super().__init__()
         vc = VisionConfig.from_dict(config["vision_config"])
         self.vision_config = vc
@@ -58,6 +65,19 @@ class VisionTower(nn.Module):
         self._lock = threading.Lock()
         #: Encodes actually run (cache misses), for tests and the bench.
         self.encodes = 0
+        #: Story 6.6: encode through :class:`~.fast.FastEncoder` (same numerics, less
+        #: work); False keeps the vendored path, which stays the reference.
+        self.fast = fast
+        self._compile = compile
+        object.__setattr__(self, "_fast_encoder", None)
+
+    def fast_encoder(self):
+        """The :class:`~.fast.FastEncoder` over these weights (built on first use)."""
+        if self._fast_encoder is None:
+            from .fast import FastEncoder
+
+            object.__setattr__(self, "_fast_encoder", FastEncoder(self, compile=self._compile))
+        return self._fast_encoder
 
     def pixel_values(self, png: bytes) -> mx.array:
         vc = self.vision_config
@@ -75,7 +95,10 @@ class VisionTower(nn.Module):
             if hit is not None:
                 self._features.move_to_end(key)
                 return hit
-        feats = self.encode_pixels(self.pixel_values(png))[0]
+        if self.fast:
+            feats = self.fast_encoder().encode_png(png)
+        else:
+            feats = self.encode_pixels(self.pixel_values(png))[0]
         mx.eval(feats)
         with self._lock:
             self.encodes += 1
@@ -125,17 +148,22 @@ def _quant_params(quant: dict[str, Any], path: str) -> dict[str, Any] | None:
 
 
 def load_vision_tower(
-    model_dir: str | Path, text_hidden_size: int | None = None, cache_size: int = 16
+    model_dir: str | Path,
+    text_hidden_size: int | None = None,
+    cache_size: int = 16,
+    fast: bool = False,
+    compile: bool = True,
 ) -> VisionTower:
     """Build the vendored tower for a Gemma 4 snapshot directory and load its weights
-    (strict: every parameter must be in the checkpoint and vice versa)."""
+    (strict: every parameter must be in the checkpoint and vice versa). ``fast`` /
+    ``compile``: the story 6.6 encode path (:class:`VisionTower` ``fast``)."""
     model_dir = Path(model_dir)
     config = json.loads((model_dir / "config.json").read_text())
     if not config.get("vision_config"):
         raise ValueError(f"{model_dir} has no vision_config")
     if text_hidden_size is None:
         text_hidden_size = int(config["text_config"]["hidden_size"])
-    tower = VisionTower(config, text_hidden_size, cache_size)
+    tower = VisionTower(config, text_hidden_size, cache_size, fast=fast, compile=compile)
     weights = vision_weights(model_dir, tower.vision_config.use_clipped_linears)
     quant = config.get("quantization") or config.get("quantization_config")
     if quant:

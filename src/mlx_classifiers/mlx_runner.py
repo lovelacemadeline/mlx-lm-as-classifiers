@@ -240,6 +240,9 @@ class MLXRunner:
     vision: Any = None
     #: Milliseconds of each image encode (cache misses only), for tests/profiling.
     vision_encode_ms: list[float] = field(default_factory=list)
+    #: Story 6.6: encode images on the fast path (compiled, shape-cached tables, no
+    #: one-hot position matmul, no all-zero mask). Off until its GPU parity is recorded.
+    vision_fast: bool = False
 
     def __post_init__(self) -> None:
         if self.chat_template is None:
@@ -315,7 +318,9 @@ class MLXRunner:
             from .vision import load_vision_tower
 
             hidden = self._backbone.config.hidden_size
-            self.vision = load_vision_tower(self.vision_dir, text_hidden_size=hidden)
+            self.vision = load_vision_tower(
+                self.vision_dir, text_hidden_size=hidden, fast=self.vision_fast
+            )
         return self.vision
 
     # --- Runner protocol ---------------------------------------------------------------
