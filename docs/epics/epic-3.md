@@ -18,7 +18,7 @@ labelled decisions file and reports held-out ECE. This is what makes the Qwen
 | id | title | status |
 |---|---|---|
 | 3.1 | /v1/systemone route beside chat completions | completed |
-| 3.2 | calibrate CLI — fit temperature, report ECE | pending |
+| 3.2 | calibrate CLI — fit temperature, report ECE | completed |
 | 3.3 | Decision log — every answer with its probabilities, for later refits | pending |
 
 ## Related

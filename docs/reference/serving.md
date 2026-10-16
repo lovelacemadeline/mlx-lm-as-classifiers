@@ -51,3 +51,35 @@ request paid for the prefix.
 All model work runs on one dedicated worker thread (MLX arrays are bound to the
 stream of the thread that created them, so the model is loaded there too). That
 also serialises requests: one model, one GPU.
+
+## Calibration config
+
+`mlx-classifiers calibrate <decisions.jsonl>...` (story
+[3.2](../stories/3-2-calibrate-cli.md)) fits one temperature per
+`(model, readout)` and writes it to a JSON config. `serve --calibration PATH`
+loads it; both default to `$MLX_CLASSIFIERS_CALIBRATION`, else
+`./calibration.json` (a missing file means no temperatures: calibrated equals
+raw). Refits merge: entries for other models or modes are kept.
+
+```json
+{"version": 1,
+ "models": {"mlx-community/gemma-4-E2B-it-qat-4bit":
+   {"first-token": {"temperature": 1.84, "n_train": 700, "n_heldout": 300,
+                    "ece_before": 0.091, "ece_after": 0.023,
+                    "nll_before": 0.61, "nll_after": 0.48,
+                    "fitted_at": "2026-10-16T12:00:00+00:00"}}}}
+```
+
+Only `temperature` is read back. The model key is the server's loaded model id
+(`MLXRunner.model_id`), not the request's `model` string. A request with
+`options.calibrated: false` is served at `T = 1`.
+
+**Input** is JSONL, one answered question per line (the decision log
+format, below) with a `label` added. The fields read are `model`, `readout`,
+`options` (option names in declared order: criteria keys, `"0"`.. for score
+levels, `"yes"`/`"no"` for noul), `raw_probabilities` (aligned with
+`options`) and `label` (an option name; a bool for noul, an int index for
+score). Lines without a label are skipped. `log(raw_probabilities)` is the
+option-logit row up to a constant, so fitting on it is fitting on logits. Each
+group is split with a seeded shuffle (`--heldout 0.3 --seed 0`); the printed
+ECE (`--bins 15`) and NLL before and after are on the held-out split.

@@ -1,0 +1,74 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "score-first-token-no-prefix",
+  "description": "4-level score with no system turn (prefix_len 0)",
+  "model": {
+    "repo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "revision": "42f62737af7a9fd8c1d55d79666c1a217be4e2e2",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "first-token",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": "URGENT: none of our payouts have arrived for three days and our whole business is blocked. Every payment to our merchants is failing and we are losing money every hour.",
+    "questions": {
+      "q": {
+        "type": "score",
+        "instructions": "How severe is the customer impact?",
+        "criteria": [
+          "trivial",
+          "minor",
+          "major",
+          "critical"
+        ]
+      }
+    }
+  },
+  "expected": {
+    "tokens": [2, 105, 2364, 107, 3112, 236787, 107, 2402, 236823, 2954, 236787, 7293, 529, 1023, 127325, 735, 12208, 573, 1806, 2668, 532, 1023, 3697, 1960, 563, 26638, 236761, 7685, 7548, 531, 1023, 48197, 563, 26929, 532, 692, 659, 15174, 3273, 1418, 6468, 236761, 108, 14977, 236787, 2088, 12778, 563, 506, 5602, 4100, 236881, 108, 15098, 568, 117835, 531, 7310, 1473, 107, 236776, 236761, 31473, 107, 236799, 236761, 9875, 107, 236780, 236761, 3262, 107, 236796, 236761, 6749, 108, 7925, 607, 506, 6064, 529, 886, 1984, 1186, 236761, 106, 107, 105, 4368, 107],
+    "prefix_len": 0,
+    "readout_position": 89,
+    "options": [
+      "0",
+      "1",
+      "2",
+      "3"
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "option_token_ids": {
+      "0": [236776],
+      "1": [236799],
+      "2": [236780],
+      "3": [236796]
+    },
+    "raw_logits": {
+      "0": 20.375,
+      "1": 20.875,
+      "2": 21.25,
+      "3": 27.875
+    },
+    "raw_probabilities": {
+      "0": 0.0005515445973016098,
+      "1": 0.0009093433093109006,
+      "2": 0.0013230867079878639,
+      "3": 0.9972160253853997
+    },
+    "answer": "3"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

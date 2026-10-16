@@ -63,19 +63,19 @@ epics:
         status: completed
       - id: "3.2"
         title: calibrate CLI — fit temperature, report ECE
-        status: pending
+        status: completed
       - id: "3.3"
         title: Decision log — every answer with its probabilities, for later refits
         status: pending
   - epic: 4
     title: Golden fixtures for the Swift + vision port
-    status: pending
+    status: in-progress
     story_home: docs/stories/
     stories_count: 2
     stories:
       - id: "4.1"
         title: Fixture format and generator
-        status: pending
+        status: completed
       - id: "4.2"
         title: Fixture checker usable from another repo
         status: pending

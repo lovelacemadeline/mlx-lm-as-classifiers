@@ -1,0 +1,59 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "noul-first-token",
+  "description": "Yes/No on a string state",
+  "model": {
+    "repo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "revision": "42f62737af7a9fd8c1d55d79666c1a217be4e2e2",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "first-token",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": "URGENT: none of our payouts have arrived for three days and our whole business is blocked. Every payment to our merchants is failing and we are losing money every hour.",
+    "questions": {
+      "q": {
+        "type": "noul",
+        "instructions": "Is the ticket about payments?"
+      }
+    },
+    "prefix": "You are the support triage router for a payments company. Answer precisely."
+  },
+  "expected": {
+    "tokens": [2, 105, 9731, 107, 3048, 659, 506, 1894, 194870, 21439, 573, 496, 13192, 2544, 236761, 25685, 19753, 236761, 106, 107, 105, 2364, 107, 3112, 236787, 107, 2402, 236823, 2954, 236787, 7293, 529, 1023, 127325, 735, 12208, 573, 1806, 2668, 532, 1023, 3697, 1960, 563, 26638, 236761, 7685, 7548, 531, 1023, 48197, 563, 26929, 532, 692, 659, 15174, 3273, 1418, 6468, 236761, 108, 14977, 236787, 2375, 506, 15049, 1003, 13192, 236881, 108, 7925, 8438, 653, 2301, 1186, 236761, 106, 107, 105, 4368, 107],
+    "prefix_len": 20,
+    "readout_position": 81,
+    "options": [
+      "yes",
+      "no"
+    ],
+    "labels": [
+      "Yes",
+      "No"
+    ],
+    "option_token_ids": {
+      "yes": [10784],
+      "no": [3771]
+    },
+    "raw_logits": {
+      "yes": 25.125,
+      "no": 19.5
+    },
+    "raw_probabilities": {
+      "yes": 0.9964063974185798,
+      "no": 0.0035936025814200896
+    },
+    "answer": "yes"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

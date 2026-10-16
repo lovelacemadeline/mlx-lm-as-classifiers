@@ -1,0 +1,77 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "choice-sequence-multi-token-options",
+  "description": "choice over option texts, one of them two tokens, scored by sequence",
+  "model": {
+    "repo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "revision": "42f62737af7a9fd8c1d55d79666c1a217be4e2e2",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "sequence",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": {
+      "channel": "email",
+      "customer": "Acme Ltd",
+      "plan": "enterprise",
+      "body": "Our invoice for March charged us twice. Please refund the duplicate charge."
+    },
+    "questions": {
+      "q": {
+        "type": "choice",
+        "instructions": "What kind of payment issue is this?",
+        "criteria": {
+          "refund": null,
+          "chargeback": null,
+          "fraud": null
+        }
+      }
+    },
+    "prefix": "You are the support triage router for a payments company. Answer precisely.",
+    "options": {
+      "readout": "sequence"
+    }
+  },
+  "expected": {
+    "tokens": [2, 105, 9731, 107, 3048, 659, 506, 1894, 194870, 21439, 573, 496, 13192, 2544, 236761, 25685, 19753, 236761, 106, 107, 105, 2364, 107, 3112, 236787, 107, 236782, 107, 138, 236775, 3063, 1083, 623, 7711, 43189, 573, 5261, 11055, 775, 10911, 236761, 7323, 19527, 506, 36929, 5536, 10498, 107, 138, 236775, 12027, 1083, 623, 6774, 827, 107, 138, 236775, 25016, 1083, 623, 10271, 1336, 11220, 827, 107, 138, 236775, 15081, 1083, 623, 98204, 236775, 107, 236783, 108, 14977, 236787, 2900, 2712, 529, 7548, 4186, 563, 672, 236881, 108, 8755, 236787, 107, 236772, 19527, 107, 236772, 5536, 1942, 107, 236772, 15797, 108, 7925, 607, 886, 5086, 7121, 618, 5267, 236761, 106, 107, 105, 4368, 107],
+    "prefix_len": 20,
+    "readout_position": 112,
+    "options": [
+      "refund",
+      "chargeback",
+      "fraud"
+    ],
+    "labels": [
+      "refund",
+      "chargeback",
+      "fraud"
+    ],
+    "option_token_ids": {
+      "refund": [91315],
+      "chargeback": [10690, 1942],
+      "fraud": [209421]
+    },
+    "raw_logits": {
+      "refund": -0.0026073455810546875,
+      "chargeback": -3.3769750595092773,
+      "fraud": -11.877607345581055
+    },
+    "raw_probabilities": {
+      "refund": 0.9668872790867195,
+      "chargeback": 0.0331059891494102,
+      "fraud": 6.731763870265875e-06
+    },
+    "answer": "refund"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

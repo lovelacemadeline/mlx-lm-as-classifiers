@@ -36,6 +36,7 @@ from pydantic import ValidationError
 
 from .decide import decide
 from .errors import ClassifierError
+from .fitting import CalibrationConfig, default_calibration_path
 from .runner import PrefixCache, Runner
 from .schema import SystemOneRequest
 
@@ -308,13 +309,16 @@ def create_app(
     load: Callable[[], Any] | None = None,
     generate: Generate | None = None,
     prefix_cache_size: int = 16,
+    calibration: CalibrationConfig | None = None,
 ) -> Litestar:
     """The Litestar app over one ``runner``, or the one ``load()`` builds.
 
     Pass ``load`` for an MLX model: it runs on the model worker thread, which
     MLX requires (arrays are bound to the thread's stream). ``generate`` backs
     the chat route; it defaults to :func:`mlx_generate` when the runner is an
-    ``MLXRunner`` and is otherwise off (the route answers 501).
+    ``MLXRunner`` and is otherwise off (the route answers 501). ``calibration``
+    supplies the fitted temperature per (model, readout) (story 3.2); without
+    one, calibrated probabilities equal raw.
     """
     if (runner is None) == (load is None):
         raise ValueError("pass exactly one of runner or load")
@@ -328,6 +332,7 @@ def create_app(
         prefixes=PrefixLRU(runner.cache_prefix, prefix_cache_size),
         worker=worker,
         generate=generate,
+        temperature=(calibration or CalibrationConfig()).temperature,
     )
     return Litestar(
         route_handlers=[systemone, chat_completions],
@@ -338,8 +343,13 @@ def create_app(
 def build_app_from_args(args: argparse.Namespace) -> Litestar:
     from .mlx_runner import MLXRunner
 
+    cal_path = args.calibration or default_calibration_path()
+    calibration = CalibrationConfig.load_or_empty(cal_path)
+    print(f"calibration: {cal_path} ({'loaded' if calibration.models else 'none fitted'})")
     return create_app(
-        load=lambda: MLXRunner.load(args.model), prefix_cache_size=args.prefix_cache_size
+        load=lambda: MLXRunner.load(args.model),
+        prefix_cache_size=args.prefix_cache_size,
+        calibration=calibration,
     )
 
 

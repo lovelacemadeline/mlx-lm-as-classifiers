@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 
 def main(argv: list[str] | None = None) -> int:
-    from . import bench, fixtures
+    from . import bench, fitting, fixtures
 
     parser = argparse.ArgumentParser(prog="mlx-classifiers")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -18,6 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     fixtures.add_arguments(f)
     sv = sub.add_parser("serve", help="/v1/systemone + /v1/chat/completions on one model (3.1)")
     _add_server_arguments(sv)
+    c = sub.add_parser("calibrate", help="fit temperatures from labelled decisions (3.2)")
+    fitting.add_arguments(c)
+    c.set_defaults(func=fitting.main)
     args = parser.parse_args(argv)
     return args.func(args)
 
@@ -34,6 +38,12 @@ def _add_server_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--prefix-cache-size", type=int, default=16, help="prefix KV caches kept (LRU)")
+    p.add_argument(
+        "--calibration",
+        type=Path,
+        default=None,
+        help="calibration config (default: $MLX_CLASSIFIERS_CALIBRATION or ./calibration.json)",
+    )
     p.set_defaults(func=run)
 
 
