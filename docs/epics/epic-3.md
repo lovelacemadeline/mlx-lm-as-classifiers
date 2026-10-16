@@ -1,6 +1,6 @@
 ---
 type: epic
-status: pending
+status: in-progress
 title: Serving and calibration
 epic: 3
 owner: maddie
@@ -17,9 +17,10 @@ labelled decisions file and reports held-out ECE. This is what makes the Qwen
 ## Stories
 | id | title | status |
 |---|---|---|
-| 3.1 | /v1/systemone route beside chat completions | pending |
+| 3.1 | /v1/systemone route beside chat completions | completed |
 | 3.2 | calibrate CLI — fit temperature, report ECE | pending |
 | 3.3 | Decision log — every answer with its probabilities, for later refits | pending |
 
 ## Related
 - [wire-schema](../reference/wire-schema.md)
+- [serving](../reference/serving.md)

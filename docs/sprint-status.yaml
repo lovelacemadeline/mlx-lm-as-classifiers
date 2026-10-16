@@ -54,13 +54,13 @@ epics:
         status: pending
   - epic: 3
     title: Serving and calibration
-    status: pending
+    status: in-progress
     story_home: docs/stories/
     stories_count: 3
     stories:
       - id: "3.1"
         title: /v1/systemone route beside chat completions
-        status: pending
+        status: completed
       - id: "3.2"
         title: calibrate CLI — fit temperature, report ECE
         status: pending

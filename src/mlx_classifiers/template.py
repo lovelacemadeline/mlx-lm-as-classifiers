@@ -7,6 +7,7 @@ prompt compilation needs nothing but a Runner.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -31,6 +32,12 @@ class RenderedChat:
 class ChatTemplate(Protocol):
     def render(self, system: str | None, user: str) -> RenderedChat: ...
 
+    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+        """A whole chat (``role``/``content`` dicts) with the assistant turn opened.
+        ``prefix_text`` is the system turn exactly as :meth:`render` gives it, so
+        a chat and a decision with the same system text share a prefix cache."""
+        ...
+
     @property
     def generation_prompt(self) -> str:
         """The assistant-start marker text that ends every rendered prompt."""
@@ -47,6 +54,16 @@ class ToyChatTemplate:
         return RenderedChat(
             prefix_text=prefix if system is not None else "",
             text=f"{prefix}<|user|>\n{user}<|end|>\n{self.generation_prompt}",
+        )
+
+    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+        msgs = list(messages)
+        system = msgs.pop(0)["content"] if msgs and msgs[0]["role"] == "system" else None
+        prefix = "<|bos|>" + (f"<|system|>\n{system}<|end|>\n" if system is not None else "")
+        turns = "".join(f"<|{m['role']}|>\n{m['content']}<|end|>\n" for m in msgs)
+        return RenderedChat(
+            prefix_text=prefix if system is not None else "",
+            text=f"{prefix}{turns}{self.generation_prompt}",
         )
 
 
@@ -80,4 +97,14 @@ class HFChatTemplate:
         prefix = self._apply(msgs, False) if system is not None else ""
         if not text.startswith(prefix):
             raise PromptError("chat template renders the system turn differently in context")
+        return RenderedChat(prefix_text=prefix, text=text)
+
+    def render_messages(self, messages: Sequence[dict[str, str]]) -> RenderedChat:
+        msgs = [{"role": m["role"], "content": m["content"]} for m in messages]
+        text = self._apply(msgs, True)
+        prefix = ""
+        if msgs and msgs[0]["role"] == "system":
+            prefix = self._apply(msgs[:1], False)
+            if not text.startswith(prefix):
+                prefix = ""  # template folds the system turn in; no shareable head
         return RenderedChat(prefix_text=prefix, text=text)
