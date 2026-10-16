@@ -139,6 +139,58 @@ _DISPUTE = {
 }
 
 
+# Image cases (story 6.5): PNGs inline as base64, so a fixture is self-contained and its
+# ``expected.images`` sha256 pins the exact bytes. A 96 x 96 blue square on white
+# (``images.write_png``; 256 soft tokens), and the gridworld frame ``gw-s3-t00``
+# (``battery/images/gw-s3-t00.png``, 160 x 192, 270 soft tokens) with the battery's
+# image-only colour key.
+_BLUE_SQUARE = (
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAIAAABt+uBvAAAAm0lEQVR42u3QQREAMAgEMUTgX1m9FAf828vOKkhd"
+    "rRUCQIAAAQIECBAgAQIECBAgQOFA3efpAQECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQ"
+    "IECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQoESgtAABAgQIECBAgAAJECBAgAAB+qwBFEIIdfmY"
+    "wcoAAAAASUVORK5CYII="
+)
+_GRIDWORLD_FRAME = (
+    "iVBORw0KGgoAAAANSUhEUgAAAKAAAADACAIAAAAMWf8gAAACxElEQVR4nO3dsWpTYRiA4UR6CY4ZOjqkUKg4d3Jy"
+    "EofiZYj0Ijp4GdJBvAAnZ1EQkkGcRbwKcXOwGTxiSM77P8904BzIKS8fJfl60uXl5ZPFFLevX026nsO6d+DXZ88E"
+    "jhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM47mQxmKvnLxZzNnUfb4LjBI4TOE7gOIHjBI4TOE7gOIHjBI4T"
+    "OE7gOIHjBI4TOO5k7s/7Tt3v3h7Zz7vv/bQJjhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM4TuC44Z4PHm0/"
+    "bYLjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOG72++Cp+9Rvj59Ouv7l/dPFnPfNJjhu0MAXm83FZnP3"
+    "uGfQwOOY/e/gf/Pp7GzncY8JjhM4TuA4geMEjhM4TuA4geMEjhM4TuC45Y/vXxdzNnW/u3r3dtbP+05lguMigcfZ"
+    "7w4amPg+eJz97lQmOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHj9r4PfvbhetL1bx7d7O1eRmSC4wSOEzhO4DiB4wSO"
+    "EzhO4DiB4wSOEzhO4DiB4wSOEzhu9s8HH9vzu1dHdj8mOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHj"
+    "Zr8Pnvu+dt9McJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHDbcPHo0JjhM4TuC4yP8PHtPl9e75fH/z"
+    "8/exCY4TOE7gOIHjBI4TOE7gOJ9Fx5ngOIHjBI5brlanh74H9sgEj7FN+rh+sPP0w+2Xoz3L3zDBcQLHCRwncJzA"
+    "cQLHCRznk6w4ExwncJzAcQLHCRwncJzAY+yDt9vPf5xYr88PcT/8ZyZ4pMDr9bnBjTHBcQLHCRwncJzAI33Lzt13"
+    "w8ydCY7zFx1xJjhO4DiBF22/ABGiZzunTXNxAAAAAElFTkSuQmCC"
+)
+_COLOUR = {
+    "type": "choice",
+    "instructions": "What colour is the square in the picture?",
+    "criteria": {"red": None, "green": None, "blue": None, "yellow": None},
+}
+_IS_RED = {"type": "noul", "instructions": "Is the square in the picture red?"}
+_PICTURE_PREFIX = "You look at pictures and answer questions about them."
+_PICTURE = ["Here is the picture:", {"type": "image/png", "base64": _BLUE_SQUARE}]
+_GRID_PREFIX = "You are playing a turn-based grid game. Each turn you see the map and a status line, and you choose exactly one action. Reach the goal G without dying; monsters M that are next to you hit you every turn."
+_GRID_STATE = [
+    "The picture is the map, north up: you are the blue square, the goal is the green cell, monsters are red cells (white pips are their hp), walls are dark grey and floor is light. The dark strip under the map shows your hp, the tick and your last action.",
+    {"type": "image/png", "base64": _GRIDWORLD_FRAME},
+]
+_GRID_ACTION = {
+    "type": "choice",
+    "instructions": "Which action next?",
+    "criteria": {
+        "north": "Move up one cell (y - 1).",
+        "south": "Move down one cell (y + 1).",
+        "east": "Move right one cell (x + 1).",
+        "west": "Move left one cell (x - 1).",
+        "attack": "Hit one adjacent monster for 1 damage.",
+        "wait": "Stay in place for one tick.",
+    },
+}
+
+
 def _req(question: dict, state: Any = _TICKET, readout: str = "first-token", prefix=_PREFIX):
     req: dict[str, Any] = {"state": state, "questions": {"q": question}}
     if prefix is not None:
@@ -187,6 +239,22 @@ SEED_CASES: tuple[FixtureCase, ...] = (
         _req(_DISPUTE, _TICKET_OBJ),
         label_style="option-text",
     ),
+    FixtureCase(
+        "choice-first-token-image-colour",
+        "4-way choice about an image block (a blue square), from a KV-cached system prefix",
+        _req(_COLOUR, _PICTURE, prefix=_PICTURE_PREFIX),
+        prefix_cached=True,
+    ),
+    FixtureCase(
+        "choice-first-token-image-gridworld",
+        "the gridworld's 6-action question on a frame given only as an image (story 6.5)",
+        _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX),
+    ),
+    FixtureCase(
+        "noul-sequence-image",
+        "Yes/No about an image block scored by sequence (the image sits in the cached prompt)",
+        _req(_IS_RED, _PICTURE, "sequence", prefix=_PICTURE_PREFIX),
+    ),
 )
 
 
@@ -226,7 +294,13 @@ def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
     req = _with_label_style(SystemOneRequest.model_validate(request), label_style)
     (name,) = req.questions
     readout = req.effective_options.readout
-    prompt = compile_question(req, name, template=runner.chat_template, tokenize=runner.tokenize)
+    prompt = compile_question(
+        req,
+        name,
+        template=runner.chat_template,
+        tokenize=runner.tokenize,
+        image_tokens=getattr(runner, "image_tokens", None),
+    )
     out: Result = {
         "tokens": list(prompt.tokens),
         "prefix_len": prompt.prefix_len,
@@ -234,6 +308,8 @@ def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
         "options": list(prompt.options),
         "labels": [prompt.label_for(i) for i in range(len(prompt.options))],
     }
+    if prompt.images:  # story 6.5; absent for text-only cases, so their files are unchanged
+        out["images"] = [s.describe() for s in prompt.images]
     if readout == "sequence":
         s = score_sequences(prompt, runner)
         out["option_token_ids"] = s.option_token_ids
@@ -252,7 +328,8 @@ def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
             out["error"] = {"type": type(e).__name__, "message": str(e)}
             return out
         cache = runner.cache_prefix(prompt.prefix_tokens) if prefix_cached else None
-        r = runner.prefill(prompt.tokens, cache, [prompt.readout_position])
+        kw = {"images": prompt.images} if prompt.images else {}
+        r = runner.prefill(prompt.tokens, cache, [prompt.readout_position], **kw)
         out["option_token_ids"] = binding.option_token_ids
         logits = gather(r.at(prompt.readout_position), binding.token_ids)
     probs = softmax(logits)
@@ -445,7 +522,8 @@ def compare(
     """Compare one result block against a fixture's ``expected`` block.
 
     Exact: ``tokens``, ``prefix_len``, ``readout_position``, ``options``,
-    ``labels``, ``option_token_ids``, ``answer``, ``error.type``. Within
+    ``labels``, ``option_token_ids``, ``images`` (each run's start, length and PNG
+    sha256), ``answer``, ``error.type``. Within
     ``prob_tol`` (max absolute difference): ``raw_probabilities``. ``raw_logits``
     distance is reported, and fails only when ``logit_tol`` is given.
     """
@@ -468,6 +546,11 @@ def compare(
         if key in result and result[key] != expected[key]:
             f.append(f"{key}: expected {expected[key]}, got {result[key]}")
             tok_ok &= key != "readout_position"
+    if "images" in expected and "images" in result:
+        want_img, got_img = list(expected["images"]), list(result["images"])
+        if [dict(x) for x in got_img] != [dict(x) for x in want_img]:
+            f.append(f"images: expected {want_img}, got {got_img}")
+            tok_ok = False
     for key in ("options", "labels"):
         if key in result and list(result[key]) != list(expected[key]):
             f.append(f"{key}: expected {expected[key]}, got {result[key]}")

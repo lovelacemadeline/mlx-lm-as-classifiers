@@ -40,7 +40,7 @@ One JSON object per file, named `<id>.json`:
 | `label_style` | `"letters"` (the normal compile) or `"option-text"`: the case runs with the wire option `options.label_style: "option-text"` (story [1.8](../stories/1-8-option-text-labels-wire-option.md); see the error case). |
 | `prefix_cached` | First-token only: `true` means the system turn was KV-cached and the prompt prefilled from it. |
 | `question` | Name of the request's single question. |
-| `request` | The `/v1/systemone` wire request ([wire schema](wire-schema.md)), exactly one question. |
+| `request` | The `/v1/systemone` wire request ([wire schema](wire-schema.md)), exactly one question. Image blocks carry their PNG inline as base64 (story [6.5](../stories/6-5-image-fixtures-and-battery.md)). |
 | `expected` | The result block below. |
 | `generator` | Package versions that wrote the file (`mlx-classifiers`, `mlx`, `mlx-lm`). Provenance only. |
 
@@ -54,6 +54,7 @@ One JSON object per file, named `<id>.json`:
 | `options` | string[]: option names in declared order (`["yes","no"]` for noul, `"0".."n-1"` for score) | exact |
 | `labels` | string[]: the label shown for each option (`Yes`/`No`, `A`.., or the option text in sequence mode) | exact |
 | `option_token_ids` | {option: int[]}: each label tokenized *in context* (after the prompt text) | exact |
+| `images` | [{start, length, sha256}]: image cases only. Each image's run of soft-token ids in `tokens` (Gemma 4: `tokens[start-1]` is boi 255999, `length` x 258880, then eoi 258882) and the sha256 of its PNG bytes | exact |
 | `raw_logits` | {option: float}: first-token, the logit at the option's mask id; sequence, the length-normalised loglikelihood | reported; gated only with `--logit-tol` |
 | `raw_probabilities` | {option: float}: softmax of `raw_logits` at T = 1 | max abs distance within `--prob-tol` (default 1e-3) |
 | `answer` | string: the option with the highest raw probability (first wins ties) | exact |
@@ -90,13 +91,21 @@ per-case `failures`, `token_ids_equal`, `max_prob_distance`,
 1. **Compile** with the model's chat template: system turn = `prefix`, user
    turn = rendered `state` plus the question (`prompt.render_user_turn`), the
    assistant turn opened. A JSON-object state is sorted-key, 2-space-indented
-   JSON; a list state is `[1] ...` blocks joined by blank lines. `tokens` must
-   match exactly; this is where template and tokenizer bugs show.
+   JSON; a list state is `[1] ...` blocks joined by blank lines. An image block
+   renders as `[i] ` plus `<|image>`, N x `<|image|>`, `<image|>`, with N from
+   the processor's aspect-preserving resize (story
+   [6.1](../stories/6-1-image-blocks-in-state.md); 256 for a square, 270 for a
+   160 x 192 frame). `tokens` must match exactly; this is where template and
+   tokenizer bugs show.
 2. **Bind** each label in context: tokenize `prompt_text + label` (a leading
    space only if the prompt does not end in whitespace) and take the ids after
    the prompt's own. First-token mode requires one distinct id per label, else
    `LabelTokenizationError`.
-3. **Prefill** on the split path, then read out:
+3. **Prefill** on the split path, then read out. Image rows take the image's
+   soft tokens (vision tower + `embed_vision`, story
+   [6.2](../stories/6-2-vendor-vision-path.md)) in place of the placeholder
+   embeddings, and per-layer inputs use the pad id 0 there
+   ([6.3](../stories/6-3-runner-image-path.md)):
    - *first-token*: if `prefix_cached`, cache `tokens[:prefix_len]`; prefill
      the rest; logits at `readout_position` only; gather the mask ids.
    - *sequence*: cache `tokens[:-1]`; for each option prefill `tokens + ids`
@@ -116,7 +125,11 @@ identical logits, but the cache boundary is recorded so a port can follow it.
 
 ## The seed set
 
-Eight cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`): noul, choice
+Eleven cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`). Three
+carry images (story [6.5](../stories/6-5-image-fixtures-and-battery.md)):
+a colour question on a blue square from a cached prefix, the gridworld's
+action question on frame `gw-s3-t00` (`battery/images/`) given only as an
+image, and a sequence-mode Yes/No on the square. The other eight: noul, choice
 and score in both readout modes; a prefix-cached case; states as a string, a
 JSON object and a list; a case with no system turn; sequence options of more
 than one token; and `choice-first-token-multi-token-label-error`, which runs

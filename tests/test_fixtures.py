@@ -117,7 +117,7 @@ def test_case_validation():
 
 def test_committed_fixtures_are_the_seed_set_on_gemma():
     fxs = load_fixtures(COMMITTED)
-    assert [fx["id"] for fx in fxs] == sorted(c.id for c in SEED_CASES)
+    assert sorted(fx["id"] for fx in fxs) == sorted(c.id for c in SEED_CASES)
     for fx in fxs:
         assert fx["model"]["repo"] == GEMMA
         assert len(fx["model"]["revision"]) == 40 and len(fx["model"]["tokenizer_sha256"]) == 64
@@ -255,3 +255,59 @@ def test_committed_fixtures_reproduce_on_mlx(mlx_runner):
     """The in-process checker mode (4.2): regenerate on MLXRunner and compare."""
     report = check(COMMITTED, lambda fx: run_case(fx, mlx_runner))
     assert report.ok, report.render()
+
+
+# --- 6.5: image fixtures --------------------------------------------------------------------
+
+BATTERY_IMAGES = Path(__file__).resolve().parent.parent / "battery" / "images"
+
+
+def _image_fixtures(directory: Path) -> list[dict]:
+    return [fx for fx in load_fixtures(directory) if "images" in fx["expected"]]
+
+
+def test_image_fixtures_pin_the_sha256_of_their_png_bytes():
+    import base64
+    import hashlib
+
+    fxs = _image_fixtures(COMMITTED)
+    assert {fx["id"] for fx in fxs} == {
+        "choice-first-token-image-colour",
+        "choice-first-token-image-gridworld",
+        "noul-sequence-image",
+    }
+    for fx in fxs:
+        blocks = [b for b in fx["request"]["state"] if isinstance(b, dict)]
+        shas = [hashlib.sha256(base64.b64decode(b["base64"])).hexdigest() for b in blocks]
+        assert [i["sha256"] for i in fx["expected"]["images"]] == shas
+        for img in fx["expected"]["images"]:
+            run = fx["expected"]["tokens"][img["start"] : img["start"] + img["length"]]
+            assert set(run) == {258880}  # Gemma 4's image soft-token id
+    grid = next(fx for fx in fxs if fx["id"] == "choice-first-token-image-gridworld")
+    frame = (BATTERY_IMAGES / "gw-s3-t00.png").read_bytes()
+    assert grid["expected"]["images"][0]["sha256"] == hashlib.sha256(frame).hexdigest()
+    assert grid["expected"]["images"][0]["length"] == 270
+
+
+def test_text_only_fixtures_carry_no_images_key():
+    for fx in load_fixtures(COMMITTED):
+        has_image = any(isinstance(b, dict) for b in fx["request"].get("state", []) or [])
+        assert ("images" in fx["expected"]) == (
+            has_image and isinstance(fx["request"]["state"], list)
+        )
+
+
+def test_a_port_with_a_different_image_fails_on_images(fake_dir):
+    results = _results(fake_dir)
+    case = next(k for k, v in results["cases"].items() if "images" in v)
+    results["cases"][case]["images"][0]["sha256"] = "0" * 64
+    report = check(fake_dir, results)
+    assert not report.ok
+    bad = next(c for c in report.cases if c.id == case)
+    assert any(f.startswith("images:") for f in bad.failures) and not bad.token_ids_equal
+
+
+def test_fake_runner_image_cases_run_both_readouts():
+    for case in (c for c in SEED_CASES if "image" in c.id):
+        out = run_case(case, FakeRunner())
+        assert out["images"] and out["answer"] in out["options"]

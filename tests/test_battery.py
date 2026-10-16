@@ -261,3 +261,44 @@ def test_calibration_config_gives_calibrated_ece(tmp_path):
     assert row["ece_calibrated"] is not None and row["ece_calibrated"] != row["ece_raw"]
     assert len(body["results"]) == 343 and body["problems"] == []
     assert "git:" in md.read_text()
+
+
+# --- story 6.5: the gridworld image slice ---------------------------------------------------
+
+GRIDWORLD = Path(__file__).resolve().parents[1] / "battery" / "gridworld.jsonl"
+IMAGES = GRIDWORLD.parent / "images"
+
+
+def test_gridworld_battery_has_three_modes_of_30_frames_with_pinned_images():
+    import base64
+    import hashlib
+
+    cases = load_battery(GRIDWORLD)
+    by_source: dict[str, list] = {}
+    for c in cases:
+        by_source.setdefault(c.tags["source"], []).append(c)
+    assert {k: len(v) for k, v in by_source.items()} == {
+        "gridworld-text": 30,
+        "gridworld-image": 30,
+        "gridworld-text+image": 30,
+    }
+    pngs = sorted(IMAGES.glob("gw-*.png"))
+    assert len(pngs) == 30
+    for c in cases:
+        frame = c.tags["group"]
+        if c.tags["source"] == "gridworld-text":
+            assert isinstance(c.wire["state"], str) and c.tags["variant"] == "base"
+            continue
+        block = c.wire["state"][-1]
+        png = base64.b64decode(block["base64"])
+        assert png == (IMAGES / f"{frame}.png").read_bytes()
+        assert hashlib.sha256(png).hexdigest() == c.tags["image_sha256"]
+    assert sum(p.stat().st_size for p in pngs) < 64 * 1024  # small
+
+
+def test_gridworld_battery_reports_accuracy_per_mode_on_the_fake_runner():
+    report = run_battery(load_battery(GRIDWORLD), FakeRunner())
+    by_source = report.summary["by_tag"]["source"]
+    assert set(by_source) == {"gridworld-text", "gridworld-image", "gridworld-text+image"}
+    assert report.summary["perturbation"]["groups"] == 30
+    assert "gridworld-image" in render_markdown(report)

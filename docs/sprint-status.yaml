@@ -111,7 +111,7 @@ epics:
         status: completed
   - epic: 6
     title: Vision runner — image blocks in the state, vendored Gemma 4 vision path
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 5
     stories:
@@ -129,4 +129,4 @@ epics:
         status: completed
       - id: "6.5"
         title: Image fixtures and a battery slice with images
-        status: pending
+        status: completed
