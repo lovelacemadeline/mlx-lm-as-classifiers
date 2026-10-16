@@ -1,0 +1,32 @@
+[project]
+name = "mlx-classifiers"
+version = "0.0.1"
+description = "System One style typed decisions from an MLX-LM decoder: prefill-only readout, masked softmax over declared options, calibrated probabilities."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Maddie Lovelace" }]
+dependencies = [
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+# The MLX runner is optional so the schema/readout core stays importable
+# (and testable) on machines without Apple silicon. Pin decided in Epic 2.
+mlx = ["mlx-lm>=0.31.3"]
+server = ["litestar>=2.12", "uvicorn>=0.30"]
+dev = ["pytest>=8", "pytest-cov", "ruff"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mlx_classifiers"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
