@@ -111,6 +111,18 @@ letter can win regardless of the state (label bias), and permutations only
 flatten that towards uniform. `sequence` mode already answers by option text,
 so the field has no effect there.
 
+## Delta cache (x-local, story [3.4](../stories/3-4-delta-prefix-caching.md))
+
+`options.delta_cache` (default `true`) lets a server reuse the KV of the
+longest common token prefix with earlier prompts, so only the changed tail is
+prefilled; `usage.cached_tokens` then counts those tokens too. `false` runs
+the request without it (the declared `prefix` is still cached). See
+[serving](serving.md#delta-prefix-caching).
+
+```json
+{ "options": { "delta_cache": false } }
+```
+
 ## Versioning
 
 The schema `$id` carries `/v1/`. Additive x-local fields do not bump the

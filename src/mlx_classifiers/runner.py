@@ -23,6 +23,14 @@ through this protocol, and the Swift + vision port mirrors it one-to-one:
     indices into ``tokens``, default: the last one), never for the whole
     sequence: the hidden state is sliced before the vocab projection.
 
+Delta prefix caching (story 3.4) is an optional extension, not part of the
+protocol: a runner with a ``prompt_cache`` attribute (a
+:class:`~mlx_classifiers.prompt_cache.PromptCacheStore`, or None when off)
+accepts ``delta: bool = True`` on ``prefill`` and ``cache_prefix``. With it, the
+call also reuses the longest cached token prefix of ``tokens`` (when longer
+than ``prefix_cache``), prefills only the rest, and stores its own state for
+later calls. ``Readout.cached_tokens`` is then that hit length.
+
 Nothing here samples. The same tokens give the same logits.
 """
 
@@ -37,6 +45,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from .prompt_cache import PromptCacheStore
 from .template import ChatTemplate, ToyChatTemplate
 
 __all__ = [
@@ -244,6 +253,10 @@ class FakeRunner:
 
     ``projected_rows`` counts vocab projections performed, so tests can assert
     logits were computed only at readout positions.
+
+    ``prompt_cache`` (default None: off) turns on delta prefix caching (story
+    3.4); the fake KV is always rewindable. ``prefill_calls`` records each
+    prefill as ``(cached_tokens, computed_tokens)``.
     """
 
     tokenizer: ToyTokenizer = field(default_factory=ToyTokenizer)
@@ -253,6 +266,8 @@ class FakeRunner:
     logit_fn: Callable[[bytes, int], float] = _default_logit
     projected_rows: int = 0
     prefilled_tokens: int = 0
+    prompt_cache: PromptCacheStore | None = None
+    prefill_calls: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def vocab_size(self) -> int:
@@ -265,20 +280,41 @@ class FakeRunner:
     def tokenize(self, text: str) -> list[int]:
         return self.tokenizer.encode(text)
 
-    def cache_prefix(self, tokens: Sequence[int]) -> PrefixCache:
+    @staticmethod
+    def _rewind(state: Any, stored_len: int, hit_len: int) -> Any:
+        return ("fake-kv", hit_len)
+
+    def _delta_hit(self, tokens: tuple[int, ...], max_len: int, have: int, delta: bool) -> int:
+        if not delta or self.prompt_cache is None:
+            return have
+        hit, _ = self.prompt_cache.lookup(tokens, self._rewind, max_len=max_len, min_len=have)
+        return max(hit, have)
+
+    def cache_prefix(self, tokens: Sequence[int], *, delta: bool = True) -> PrefixCache:
         tokens = tuple(tokens)
-        self.prefilled_tokens += len(tokens)
-        return PrefixCache(tokens=tokens, state=("fake-kv", len(tokens)))
+        hit = self._delta_hit(tokens, len(tokens), 0, delta)
+        self.prefilled_tokens += len(tokens) - hit
+        state = ("fake-kv", len(tokens))
+        if delta and self.prompt_cache is not None and len(tokens) > hit:
+            self.prompt_cache.insert(tokens, state, len(tokens))
+        return PrefixCache(tokens=tokens, state=state)
 
     def prefill(
         self,
         tokens: Sequence[int],
         prefix_cache: PrefixCache | None = None,
         readout_positions: Sequence[int] | None = None,
+        *,
+        delta: bool = True,
     ) -> Readout:
         tokens = tuple(tokens)
         n_cached, positions = check_prefill_args(tokens, prefix_cache, readout_positions)
+        p0 = min(positions)
+        n_cached = self._delta_hit(tokens, p0, n_cached, delta)
+        if delta and self.prompt_cache is not None and p0 > n_cached:
+            self.prompt_cache.insert(tokens[:p0], ("fake-kv", p0), p0)
         self.prefilled_tokens += len(tokens) - n_cached
+        self.prefill_calls.append((n_cached, len(tokens) - n_cached))
         rows = []
         for p in positions:
             digest = hashlib.blake2b(

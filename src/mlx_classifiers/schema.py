@@ -80,6 +80,7 @@ class RequestOptions(ClosedModel):
     calibrated: bool = True
     readout: Literal["first-token", "sequence"] = "first-token"
     label_style: Literal["letters", "option-text"] = "letters"
+    delta_cache: bool = True
     debug: bool = False
 
 

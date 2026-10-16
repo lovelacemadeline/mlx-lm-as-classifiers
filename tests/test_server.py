@@ -8,6 +8,7 @@ from conftest import GEMMA, HF_HUB
 pytest.importorskip("litestar")
 from litestar.testing import TestClient
 
+from mlx_classifiers.prompt_cache import PromptCacheStore
 from mlx_classifiers.runner import FakeRunner
 from mlx_classifiers.schema import SystemOneResponse
 from mlx_classifiers.server import ChatResult, PrefixLRU, create_app
@@ -283,6 +284,54 @@ def test_thinking_chat_reads_a_matching_prefix_without_writing_the_lru():
     assert r.headers["x-prefix-cache"] == "hit"
     assert gen.calls[0]["cache"] is next(iter(lru(app)._entries.values()))
     assert (lru(app).hits, lru(app).misses) == hits  # peek counts nothing
+
+
+# --- story 3.4: delta prefix caching -----------------------------------------------------------------------------
+
+GRID_QUESTIONS = {
+    "move": {
+        "type": "choice",
+        "instructions": "Which way?",
+        "criteria": {"up": None, "down": None, "left": None, "right": None},
+    },
+    "safe": {"type": "noul", "instructions": "Is the agent safe?"},
+}
+
+
+def _body(state, **options):
+    b = {"prefix": "Rules of the grid.", "state": state, "questions": GRID_QUESTIONS}
+    if options:
+        b["options"] = options
+    return b
+
+
+def test_server_reports_the_delta_hit_length():
+    state = "Map: " + "wall floor " * 40
+    app = create_app(FakeRunner())
+    assert isinstance(app.state.server.runner.prompt_cache, PromptCacheStore)
+    with TestClient(app=app) as client:
+        first = client.post("/v1/systemone", json=_body(state + "agent at 1 1."))
+        second = client.post("/v1/systemone", json=_body(state + "agent at 1 2."))
+        off = client.post("/v1/systemone", json=_body(state + "agent at 1 3.", delta_cache=False))
+    prefix = int(first.headers["x-prefix-cache-tokens"])
+    assert first.headers["x-prefix-cache"] == "miss" and prefix > 0  # declared prefix only
+    assert second.headers["x-prefix-cache"] == "hit"
+    hit = int(second.headers["x-prefix-cache-tokens"])
+    assert hit > prefix + 80  # the map was reused, not just the rules
+    assert second.json()["usage"]["cached_tokens"] >= hit
+    assert int(off.headers["x-prefix-cache-tokens"]) == prefix
+
+
+def test_server_flag_turns_the_delta_cache_off():
+    runner = FakeRunner(prompt_cache=PromptCacheStore())
+    app = create_app(runner, delta_cache=False)
+    assert runner.prompt_cache is None
+    state = "Map: " + "wall floor " * 40
+    with TestClient(app=app) as client:
+        client.post("/v1/systemone", json=_body(state + "a."))
+        second = client.post("/v1/systemone", json=_body(state + "b."))
+    assert second.headers["x-prefix-cache"] == "hit"
+    assert int(second.headers["x-prefix-cache-tokens"]) < 20  # the declared prefix only
 
 
 # --- real model -------------------------------------------------------------------------

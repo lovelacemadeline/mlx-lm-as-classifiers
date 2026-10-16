@@ -18,6 +18,13 @@ a per-call ``enable_thinking``, and splits a thinking trace out of the
 generated tokens into ``message.reasoning``. Generation always runs on its own
 copy of the KV: a thinking call only *peeks* the LRU (never inserts or
 reorders), so a long planning call cannot evict or alter a decision prefix.
+
+Delta prefix caching (story 3.4): decisions also reuse the longest common token
+prefix with earlier prompts through the runner's ``prompt_cache``
+(:class:`~mlx_classifiers.prompt_cache.PromptCacheStore`), installed by
+:func:`create_app` (``delta_cache=False`` / ``serve --no-delta-cache`` turns it
+off). ``x-prefix-cache-tokens`` reports the hit length of the request's first
+prefill; ``x-prefix-cache`` keeps reporting the declared prefix's LRU status.
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ from .decide import decide
 from .decision_log import DecisionLog, decision_records
 from .errors import ClassifierError
 from .fitting import CalibrationConfig, default_calibration_path
+from .prompt_cache import DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, PromptCacheStore
 from .runner import PrefixCache, Runner
 from .schema import SystemOneRequest
 from .template import ThinkingMarkers
@@ -97,14 +105,20 @@ class PrefixLRU:
         with self._lock:
             return self._entries.get(tuple(tokens))
 
-    def get(self, tokens: Sequence[int]) -> tuple[PrefixCache, bool]:
+    def get(
+        self,
+        tokens: Sequence[int],
+        build: Callable[[Sequence[int]], PrefixCache] | None = None,
+    ) -> tuple[PrefixCache, bool]:
+        """``build`` overrides the constructor's builder for a miss (e.g. without
+        the delta cache)."""
         key = tuple(tokens)
         with self._lock:
             if key in self._entries:
                 self._entries.move_to_end(key)
                 self.hits += 1
                 return self._entries[key], True
-        cache = self.build(key)
+        cache = (build or self.build)(key)
         with self._lock:
             self.misses += 1
             self._entries[key] = cache
@@ -127,8 +141,10 @@ class CachingRunner:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.runner, name)
 
-    def cache_prefix(self, tokens: Sequence[int]) -> PrefixCache:
-        return self.prefixes.get(tokens)[0]
+    def cache_prefix(self, tokens: Sequence[int], *, delta: bool = True) -> PrefixCache:
+        if delta:
+            return self.prefixes.get(tokens)[0]
+        return self.prefixes.get(tokens, lambda t: self.runner.cache_prefix(t, delta=False))[0]
 
 
 @dataclass(frozen=True)
@@ -278,22 +294,28 @@ async def systemone(request: Request, state: State) -> Response:
         )
     s: ServerState = state.server
     try:
-        resp, hit = await s.run(lambda: _decide(s, req))
+        resp, hit, delta_hit = await s.run(lambda: _decide(s, req))
     except ClassifierError as exc:
         return _unprocessable(str(exc))
     return Response(
         resp.to_wire(),
         status_code=200,
-        headers={"x-prefix-cache": hit},
+        headers={"x-prefix-cache": hit, "x-prefix-cache-tokens": str(delta_hit)},
     )
 
 
 def _decide(s: ServerState, req: SystemOneRequest):
-    """Run ``decide`` through the LRU; report whether its prefix was a hit."""
+    """Run ``decide`` through the LRU; report whether its prefix was a hit, and
+    the cached tokens of its first prefill (declared prefix or delta hit)."""
     opts = req.effective_options
     fitted = s.temperature(s.model_id, opts.readout)
     hits, misses = s.prefixes.hits, s.prefixes.misses
+    calls = getattr(s.runner, "prefill_calls", None)
+    n_calls = len(calls) if calls is not None else 0
     resp = decide(req, CachingRunner(s.runner, s.prefixes), temperature=fitted)
+    delta_hit = calls[n_calls][0] if calls is not None and len(calls) > n_calls else 0
+    if calls is not None:
+        del calls[:]  # a server never reads older calls; keep the list from growing
     if s.log is not None:  # story 3.3
         applied = fitted if (opts.calibrated and fitted is not None) else 1.0
         s.log.append(decision_records(req, resp, model=s.model_id, temperature=applied))
@@ -303,7 +325,7 @@ def _decide(s: ServerState, req: SystemOneRequest):
         hit = "miss"
     else:
         hit = "none"
-    return resp, hit
+    return resp, hit, delta_hit
 
 
 @post("/v1/chat/completions", status_code=200)
@@ -427,6 +449,9 @@ def create_app(
     calibration: CalibrationConfig | None = None,
     log: str | Path | DecisionLog | None = None,
     max_tokens_ceiling: int = DEFAULT_MAX_TOKENS_CEILING,
+    delta_cache: bool = True,
+    delta_cache_entries: int = DEFAULT_MAX_ENTRIES,
+    delta_cache_bytes: int = DEFAULT_MAX_BYTES,
 ) -> Litestar:
     """The Litestar app over one ``runner``, or the one ``load()`` builds.
 
@@ -437,13 +462,20 @@ def create_app(
     supplies the fitted temperature per (model, readout) (story 3.2); without
     one, calibrated probabilities equal raw. ``log`` appends every served
     decision to a JSONL file (story 3.3). ``max_tokens_ceiling`` bounds a chat
-    request's ``max_tokens`` (story 3.5).
+    request's ``max_tokens`` (story 3.5). ``delta_cache`` installs a fresh
+    :class:`PromptCacheStore` (``delta_cache_entries`` entries, ``delta_cache_bytes``
+    KV bytes) as the runner's ``prompt_cache``, or with False removes it, on any
+    runner that has the attribute (story 3.4).
     """
     if (runner is None) == (load is None):
         raise ValueError("pass exactly one of runner or load")
     worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-classifiers-model")
     if load is not None:
         runner = worker.submit(load).result()
+    if hasattr(runner, "prompt_cache"):
+        runner.prompt_cache = (
+            PromptCacheStore(delta_cache_entries, delta_cache_bytes) if delta_cache else None
+        )
     if generate is None and type(runner).__name__ == "MLXRunner":
         generate = mlx_generate
     server = ServerState(
@@ -475,6 +507,9 @@ def build_app_from_args(args: argparse.Namespace) -> Litestar:
         calibration=calibration,
         log=args.log,
         max_tokens_ceiling=getattr(args, "max_tokens_ceiling", DEFAULT_MAX_TOKENS_CEILING),
+        delta_cache=not getattr(args, "no_delta_cache", False),
+        delta_cache_entries=getattr(args, "delta_cache_entries", DEFAULT_MAX_ENTRIES),
+        delta_cache_bytes=int(getattr(args, "delta_cache_mb", DEFAULT_MAX_BYTES >> 20)) << 20,
     )
 
 

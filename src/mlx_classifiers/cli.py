@@ -41,6 +41,17 @@ def _add_server_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--port", type=int, default=8080)
     p.add_argument("--prefix-cache-size", type=int, default=16, help="prefix KV caches kept (LRU)")
     p.add_argument(
+        "--no-delta-cache",
+        action="store_true",
+        help="turn off delta prefix caching on the longest common token prefix (3.4)",
+    )
+    p.add_argument(
+        "--delta-cache-entries", type=int, default=8, help="delta cache entries kept (LRU)"
+    )
+    p.add_argument(
+        "--delta-cache-mb", type=int, default=2048, help="delta cache KV budget in MiB (LRU)"
+    )
+    p.add_argument(
         "--max-tokens-ceiling",
         type=int,
         default=8192,

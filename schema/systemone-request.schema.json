@@ -87,6 +87,8 @@
           "description": "first-token: masked softmax over option-label tokens at the readout position. sequence: teacher-forced loglikelihood of each full option string (ADR-0003)." },
         "label_style": { "type": "string", "enum": ["letters", "option-text"], "default": "letters",
           "description": "First-token labels for choice and score options. letters: options are shown as A., B., ... and the model answers a letter. option-text: options are shown by name and the model answers the name, read out at its first token; every name must be a single token in context. noul always uses Yes/No. Ignored in sequence mode, which always scores the option text." },
+        "delta_cache": { "type": "boolean", "default": true,
+          "description": "Reuse the KV of the longest common token prefix with earlier prompts (the server's delta cache), so only the changed tail is prefilled. false runs this request without it; the declared prefix is cached either way." },
         "debug": { "type": "boolean", "default": false,
           "description": "Include the readout token ids and raw logits in each answer." }
       }

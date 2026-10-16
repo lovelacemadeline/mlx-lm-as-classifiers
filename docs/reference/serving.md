@@ -107,6 +107,37 @@ turn). `usage.cached_tokens` counts the prefix tokens each prefill reused, so
 it is non-zero on a first request too; the header is what says whether this
 request paid for the prefix.
 
+## Delta prefix caching
+
+Story [3.4](../stories/3-4-delta-prefix-caching.md). Beside the declared
+`prefix` LRU, the runner keeps a delta cache (`PromptCacheStore`, default 8
+entries and 2 GiB of KV; `serve --delta-cache-entries N --delta-cache-mb M`,
+`--no-delta-cache` turns it off). Every prefill looks up the stored token
+sequence sharing the **longest common token prefix** with its own prompt,
+rewinds a copy of that KV to the shared length, and prefills only the rest;
+afterwards it stores its own state. A sequential controller whose state
+changes only near the end (a map with a moving tail, an append-only
+transcript) then pays per tick for the delta, not the whole state. Other
+questions and permutations of the same request share the state head, so they
+benefit automatically.
+
+- `usage.cached_tokens` counts the tokens each prefill took from cache
+  (declared prefix or delta hit, whichever is longer).
+- `x-prefix-cache-tokens: N` is the hit length of the request's first
+  prefill. `x-prefix-cache: hit | miss | none` is unchanged and still
+  reports only the declared prefix's LRU (clients compare it to `hit`).
+- `options.delta_cache: false` runs one request without the delta cache (no
+  lookup, no insert); its declared prefix is still cached.
+- Sliding-window layers (Gemma's 512-token `RotatingKVCache`) can only be
+  rewound as far as the rows they still hold: an entry rewinds into its own
+  last delta, or anywhere if it was built from an empty cache in one chunk.
+  A deeper rewind is refused for that entry and the lookup tries the next
+  one, then falls back to the declared prefix. Changing the state earlier
+  than the previous tick did is the case that hits this.
+- Results match the uncached path up to bf16 noise from the different
+  chunking (story 3.4 measures it); golden fixtures run with the delta cache
+  off because they pin a cache path.
+
 All model work runs on one dedicated worker thread (MLX arrays are bound to the
 stream of the thread that created them, so the model is loaded there too). That
 also serialises requests: one model, one GPU.

@@ -1,6 +1,6 @@
 ---
 type: epic
-status: in-progress
+status: completed
 title: Serving and calibration
 epic: 3
 owner: maddie
@@ -20,7 +20,7 @@ labelled decisions file and reports held-out ECE. This is what makes the Qwen
 | 3.1 | /v1/systemone route beside chat completions | completed |
 | 3.2 | calibrate CLI — fit temperature, report ECE | completed |
 | 3.3 | Decision log — every answer with its probabilities, for later refits | completed |
-| 3.4 | Delta prefix caching on the longest common token prefix | pending |
+| 3.4 | Delta prefix caching on the longest common token prefix | completed |
 | 3.5 | Chat route honours max_tokens and a per-call thinking toggle | completed |
 
 ## Related

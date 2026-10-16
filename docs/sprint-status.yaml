@@ -60,7 +60,7 @@ epics:
         status: pending
   - epic: 3
     title: Serving and calibration
-    status: in-progress
+    status: completed
     story_home: docs/stories/
     stories_count: 5
     stories:
@@ -75,7 +75,7 @@ epics:
         status: completed
       - id: "3.4"
         title: Delta prefix caching on the longest common token prefix
-        status: pending
+        status: completed
       - id: "3.5"
         title: Chat route honours max_tokens and a per-call thinking toggle
         status: completed

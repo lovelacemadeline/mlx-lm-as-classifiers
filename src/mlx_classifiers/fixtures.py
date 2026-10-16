@@ -37,6 +37,7 @@ from typing import Any
 from .calibrate import gather, softmax
 from .errors import ClassifierError
 from .prompt import compile_question
+from .prompt_cache import without_delta
 from .readout import bind_options, label_token_ids
 from .schema import SystemOneRequest
 from .sequence import score_sequences
@@ -217,7 +218,10 @@ def run_case(case: FixtureCase | Mapping[str, Any], runner: Any) -> Result:
 
     This is the reference a port mirrors: compile, bind in context, prefill
     (from the system-turn cache when ``prefix_cached``), gather, raw softmax.
+    Delta prefix caching (story 3.4) is off: a case pins its cache path, and a
+    hit from an earlier case would change the chunking (bf16 noise).
     """
+    runner = without_delta(runner)
     request, prefix_cached, label_style = _case_fields(case)
     req = _with_label_style(SystemOneRequest.model_validate(request), label_style)
     (name,) = req.questions

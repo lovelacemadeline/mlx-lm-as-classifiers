@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from .answers import shape_answer
 from .calibrate import gather, softmax
 from .prompt import CompiledPrompt, compile_question
+from .prompt_cache import without_delta
 from .readout import bind_options
 from .runner import PrefixCache, Runner
 from .schema import ChoiceQuestion, Debug, SystemOneRequest, SystemOneResponse, Timing, Usage
@@ -89,12 +90,22 @@ def decide(
     are compiled once. With ``debug``, ``permutation_spread`` gives each option's
     max minus min calibrated probability across orderings.
 
+    Delta prefix caching (story 3.4) is on whenever the runner has a
+    ``prompt_cache`` store: each prefill reuses the longest cached token prefix
+    of its prompt (from this request's earlier prompts, e.g. other questions or
+    permutations sharing the state, or from earlier requests), so ``cached_tokens``
+    can exceed the declared prefix. ``options.delta_cache = false`` runs this
+    request without the store (no lookup, no insert); the declared ``prefix`` is
+    still cached either way.
+
     ``usage.input_tokens`` sums the tokens each prefill computed (suffixes only
     when cached) and ``cached_tokens`` the cached tokens each one reused; one-off
     ``cache_prefix`` costs are not counted.
     """
     t0 = time.perf_counter()
     opts = request.effective_options
+    if not opts.delta_cache:
+        runner = without_delta(runner)
     readout = opts.readout
     applied = temperature if (opts.calibrated and temperature is not None) else 1.0
 
