@@ -19,6 +19,7 @@ __all__ = [
     "ChoiceAnswer",
     "ChoiceQuestion",
     "Debug",
+    "ImageBlock",
     "NoulAnswer",
     "NoulQuestion",
     "Question",
@@ -70,6 +71,13 @@ class ScoreQuestion(ClosedModel):
     )
 
 
+class ImageBlock(ClosedModel):
+    """x-local (story 6.1). An image in a list-valued ``state``, at its list position."""
+
+    type: Literal["image/png"]
+    base64: str = Field(description="The PNG file, base64-encoded.")
+
+
 Question = Annotated[NoulQuestion | ChoiceQuestion | ScoreQuestion, Field(discriminator="type")]
 
 
@@ -89,7 +97,7 @@ class SystemOneRequest(ClosedModel):
     # annotated without ``| None`` so an explicit ``null`` is rejected; the
     # ``None`` default is never validated.
     model: str = Field(default=None, description="Model id. Omit for the server default.")
-    state: str | dict[str, Any] | list[str]
+    state: str | dict[str, Any] | list[str | ImageBlock]
     prefix: str = Field(
         default=None, description="x-local. Stable rules/system text, KV-cached across requests."
     )
@@ -99,6 +107,11 @@ class SystemOneRequest(ClosedModel):
     @property
     def effective_options(self) -> RequestOptions:
         return self.options if self.options is not None else RequestOptions()
+
+    @property
+    def has_images(self) -> bool:
+        """True when the state list holds at least one image block (story 6.1)."""
+        return isinstance(self.state, list) and any(isinstance(b, ImageBlock) for b in self.state)
 
 
 # --- response ----------------------------------------------------------------

@@ -57,12 +57,13 @@ def score_sequences(
         raise LabelTokenizationError(
             f"options {list(prompt.options)} include identically tokenized texts"
         )
-    cache = runner.cache_prefix(tokens[:-1])
+    kw = {"images": prompt.images} if prompt.images else {}
+    cache = runner.cache_prefix(tokens[:-1], **kw)
     lls, scores = [], []
     input_tokens, cached_tokens = 0, 0
     for ids in conts:
         positions = range(n - 1, n - 1 + len(ids))  # position p predicts token p + 1
-        readout = runner.prefill(tokens + ids, cache, positions)
+        readout = runner.prefill(tokens + ids, cache, positions, **kw)
         ll = math.fsum(token_logprob(readout.at(p), t) for p, t in zip(positions, ids, strict=True))
         lls.append(ll)
         scores.append(ll / len(ids))

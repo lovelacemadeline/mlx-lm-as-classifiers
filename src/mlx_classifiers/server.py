@@ -141,7 +141,11 @@ class CachingRunner:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.runner, name)
 
-    def cache_prefix(self, tokens: Sequence[int], *, delta: bool = True) -> PrefixCache:
+    def cache_prefix(
+        self, tokens: Sequence[int], *, delta: bool = True, images: Sequence[Any] = ()
+    ) -> PrefixCache:
+        if images:  # keyed by tokens alone, the LRU cannot tell images apart (story 6.3)
+            return self.runner.cache_prefix(tokens, delta=delta, images=images)
         if delta:
             return self.prefixes.get(tokens)[0]
         return self.prefixes.get(tokens, lambda t: self.runner.cache_prefix(t, delta=False))[0]

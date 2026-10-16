@@ -111,13 +111,13 @@ epics:
         status: completed
   - epic: 6
     title: Vision runner — image blocks in the state, vendored Gemma 4 vision path
-    status: pending
+    status: in-progress
     story_home: docs/stories/
     stories_count: 5
     stories:
       - id: "6.1"
         title: Image blocks in the wire state and in prompt compilation
-        status: pending
+        status: completed
       - id: "6.2"
         title: Vendor the Gemma 4 vision encoder, projector and merge with provenance
         status: pending

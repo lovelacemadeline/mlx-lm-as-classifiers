@@ -1,6 +1,6 @@
 ---
 type: epic
-status: pending
+status: in-progress
 title: Vision runner — image blocks in the state, vendored Gemma 4 vision path
 epic: 6
 owner: maddie
@@ -22,7 +22,7 @@ non-standard ops are checked first; the dependency is the documented fallback.
 ## Stories
 | id | title | status |
 |---|---|---|
-| 6.1 | Image blocks in the wire state and in prompt compilation | pending |
+| 6.1 | Image blocks in the wire state and in prompt compilation | completed |
 | 6.2 | Vendor the Gemma 4 vision encoder, projector and merge with provenance | pending |
 | 6.3 | MLXRunner image path — encode, merge embeddings, same split prefill | pending |
 | 6.4 | Parity test against mlx-vlm as a dev-only reference | pending |

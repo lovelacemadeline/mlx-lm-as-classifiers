@@ -33,7 +33,8 @@ that ignores them is still Jev-compatible.
 ```
 
 - `state` may be a string, a JSON object (rendered as pretty JSON), or a list
-  of strings (rendered as numbered blocks).
+  of strings (rendered as numbered blocks). A list may also hold image blocks
+  (x-local, below).
 - `prefix` (x-local) is the stable part. The runner caches its KV once and
   only prefills `state` + questions per request.
 - `criteria` is a **map** for `choice` (name to optional description) and an
@@ -122,6 +123,22 @@ the request without it (the declared `prefix` is still cached). See
 ```json
 { "options": { "delta_cache": false } }
 ```
+
+## Image blocks (x-local, story [6.1](../stories/6-1-image-blocks-in-state.md))
+
+A list `state` may hold `{"type": "image/png", "base64": "<PNG file, base64>"}`
+blocks beside strings; no other keys. The model sees the image exactly where
+the block sits: it renders as `[i] ` followed by the model's image placeholder
+run (Gemma 4: `<|image>`, N soft tokens, `<image|>`, with N from the image's
+size, 270 for a 160 x 192 frame, 256 for any square image).
+
+```json
+{ "state": ["Status: hp 6 | tick 3", {"type": "image/png", "base64": "iVBORw0KGgo..."}] }
+```
+
+A runner without a vision path, a payload that is not a PNG, or a state text
+containing the placeholder token itself is a compile error. Requests without
+image blocks compile exactly as before.
 
 ## Versioning
 

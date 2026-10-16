@@ -58,7 +58,8 @@ def _score(
         s = score_sequences(prompt, runner)
         return _Scored(prompt, list(s.scores), s.option_token_ids, s.input_tokens, s.cached_tokens)
     binding = bind_options(prompt, runner.tokenize)
-    r = runner.prefill(prompt.tokens, cache, [prompt.readout_position])
+    kw = {"images": prompt.images} if prompt.images else {}
+    r = runner.prefill(prompt.tokens, cache, [prompt.readout_position], **kw)
     logits = gather(r.at(prompt.readout_position), binding.token_ids)
     return _Scored(prompt, logits, binding.option_token_ids, r.input_tokens, r.cached_tokens)
 
@@ -117,6 +118,7 @@ def decide(
             tokenize=runner.tokenize,
             order=order,
             readout=readout,
+            image_tokens=getattr(runner, "image_tokens", None),
         )
 
     plans: dict[str, list[CompiledPrompt]] = {}

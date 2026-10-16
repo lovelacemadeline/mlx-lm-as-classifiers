@@ -164,11 +164,13 @@ class _NoDelta:
     def __getattr__(self, name: str) -> Any:
         return getattr(self.runner, name)
 
-    def cache_prefix(self, tokens: Sequence[int]) -> Any:
-        return self.runner.cache_prefix(tokens, delta=False)
+    def cache_prefix(self, tokens: Sequence[int], **kw: Any) -> Any:
+        return self.runner.cache_prefix(tokens, delta=False, **kw)
 
-    def prefill(self, tokens: Sequence[int], prefix_cache=None, readout_positions=None) -> Any:
-        return self.runner.prefill(tokens, prefix_cache, readout_positions, delta=False)
+    def prefill(
+        self, tokens: Sequence[int], prefix_cache=None, readout_positions=None, **kw: Any
+    ) -> Any:
+        return self.runner.prefill(tokens, prefix_cache, readout_positions, delta=False, **kw)
 
 
 def without_delta(runner: Any) -> Any:
