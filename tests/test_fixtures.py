@@ -22,9 +22,14 @@ from mlx_classifiers.fixtures import (
     generate,
     load_fixtures,
     run_case,
+    select_cases,
 )
 
 COMMITTED = Path(__file__).resolve().parent.parent / "fixtures"
+COMMITTED_26B = COMMITTED / "26b"  # story 4.4
+GEMMA_26B = "mlx-community/gemma-4-26B-A4B-it-qat-4bit"
+_SNAP_26B = HF_HUB / f"models--{GEMMA_26B.replace('/', '--')}" / "snapshots"
+_HAVE_26B = any(_SNAP_26B.glob("*/model*.safetensors"))
 _SNAP = HF_HUB / f"models--{GEMMA.replace('/', '--')}" / "snapshots"
 _HAVE_GEMMA = any(_SNAP.glob("*/model.safetensors"))
 
@@ -395,3 +400,50 @@ def test_unknown_gate_in_a_fixture_fails_the_case(fake_dir):
     fxs[0]["gate"] = "loose"
     (bad,) = [c for c in check(fxs, _results(fake_dir)).cases if not c.ok]
     assert bad.failures == ["gate: unknown gate 'loose', expected one of ['full', 'answer-and-ids']"]
+
+
+# --- 4.4: a case subset for a second model (the 26B) ---------------------------------------
+
+
+def test_select_cases_keeps_the_given_order_and_rejects_unknown_ids():
+    assert select_cases(None) == list(SEED_CASES)
+    got = select_cases("noul-sequence, noul-first-token")
+    assert [c.id for c in got] == ["noul-sequence", "noul-first-token"]
+    with pytest.raises(ValueError, match="nope"):
+        select_cases("noul-sequence,nope")
+
+
+def test_generate_cases_flag_writes_only_the_subset(tmp_path, monkeypatch):
+    import mlx_classifiers.fixtures as fx_mod
+
+    monkeypatch.setattr(fx_mod, "_load_runner", lambda repo, int8=False: FakeRunner())
+    out = tmp_path / "sub"
+    assert cli_main(["fixtures", "generate", str(out), "--cases", "noul-sequence"]) == 0
+    assert [p.name for p in out.glob("*.json")] == ["noul-sequence.json"]
+    assert cli_main(["fixtures", "generate", str(out), "--cases", "nope"]) == 2
+
+
+def test_committed_26b_fixtures_are_seed_cases_pinned_to_the_26b():
+    fxs = load_fixtures(COMMITTED_26B)
+    by_id = {c.id: c for c in SEED_CASES}
+    assert [fx["id"] for fx in fxs] == [
+        "choice-first-token-image-gridworld-vt140",
+        "choice-first-token-image-gridworld-you-vt140",
+        "choice-sequence-multi-token-options",
+        "noul-first-token",
+        "noul-sequence",
+    ]
+    for fx in fxs:
+        assert fx["model"]["repo"] == GEMMA_26B  # per case, so a port can skip it
+        assert fx.get("gate", "full") == by_id[fx["id"]].gate
+    # the flat E2B set is unchanged by the subdirectory
+    assert {fx["model"]["repo"] for fx in load_fixtures(COMMITTED)} == {GEMMA}
+
+
+@pytest.mark.skipif(not _HAVE_26B, reason=f"{GEMMA_26B} not in the HF cache")
+def test_committed_26b_fixtures_pass_on_mlx():
+    from mlx_classifiers.mlx_runner import MLXRunner
+
+    runner = MLXRunner.load(GEMMA_26B)
+    report = check(load_fixtures(COMMITTED_26B), lambda fx: run_case(fx, runner))
+    assert report.ok, report.render()

@@ -92,7 +92,7 @@ epics:
     title: Golden fixtures for the Swift + vision port
     status: completed
     story_home: docs/stories/
-    stories_count: 3
+    stories_count: 4
     stories:
       - id: "4.1"
         title: Fixture format and generator
@@ -102,6 +102,9 @@ epics:
         status: completed
       - id: "4.3"
         title: Per-fixture gate — near-tied gridworld cases on answer and ids, clear-winner image fixtures at every budget
+        status: completed
+      - id: "4.4"
+        title: 26B fixture subset — five seed cases pinned to Gemma 4 26B-A4B in fixtures/26b
         status: completed
   - epic: 5
     title: Static decision battery (accuracy, calibration, position bias)

@@ -22,6 +22,18 @@ mlx-classifiers fixtures check fixtures/ --results results.json   # check a port
 mlx-classifiers fixtures check fixtures/ --runner mlx             # determinism, in process
 ```
 
+One directory per model: `fixtures/` is the E2B set (every seed case) and
+`fixtures/26b/` the Gemma 4 26B-A4B set
+([story 4.4](../stories/4-4-26b-fixture-subset.md)), a subset written with
+`--cases` and checked as its own directory. Every file still carries
+`model.repo`, so a port can skip a model it does not have:
+
+```bash
+mlx-classifiers fixtures generate fixtures/26b --model mlx-community/gemma-4-26B-A4B-it-qat-4bit \
+  --cases noul-first-token,noul-sequence,choice-sequence-multi-token-options,choice-first-token-image-gridworld-vt140,choice-first-token-image-gridworld-you-vt140
+mlx-classifiers fixtures check fixtures/26b --runner mlx          # model from the fixtures
+```
+
 ## Fixture file (`format: "mlx-classifiers-fixture/1"`)
 
 One JSON object per file, named `<id>.json`:

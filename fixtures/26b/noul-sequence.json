@@ -1,0 +1,62 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "noul-sequence",
+  "description": "Yes/No scored by sequence loglikelihood",
+  "model": {
+    "repo": "mlx-community/gemma-4-26B-A4B-it-qat-4bit",
+    "revision": "0e3cbab38ce568cf6e23543010d08d03b731910c",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "sequence",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": "The office plants need watering on Fridays.",
+    "questions": {
+      "q": {
+        "type": "noul",
+        "instructions": "Is the ticket about payments?"
+      }
+    },
+    "prefix": "You are the support triage router for a payments company. Answer precisely.",
+    "options": {
+      "readout": "sequence"
+    }
+  },
+  "expected": {
+    "tokens": [2, 105, 9731, 107, 3048, 659, 506, 1894, 194870, 21439, 573, 496, 13192, 2544, 236761, 25685, 19753, 236761, 106, 107, 105, 2364, 107, 3112, 236787, 107, 818, 4408, 6485, 1202, 56661, 580, 100047, 236761, 108, 14977, 236787, 2375, 506, 15049, 1003, 13192, 236881, 108, 7925, 8438, 653, 2301, 1186, 236761, 106, 107, 105, 4368, 107, 100, 45518, 107, 101],
+    "prefix_len": 20,
+    "readout_position": 58,
+    "options": [
+      "yes",
+      "no"
+    ],
+    "labels": [
+      "Yes",
+      "No"
+    ],
+    "option_token_ids": {
+      "yes": [8438],
+      "no": [2301]
+    },
+    "raw_logits": {
+      "yes": -28.03125762939453,
+      "no": -12.562507629394531
+    },
+    "raw_probabilities": {
+      "yes": 1.9142874402601022e-07,
+      "no": 0.999999808571256
+    },
+    "answer": "no"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

@@ -489,6 +489,20 @@ def generate(
     return paths
 
 
+def select_cases(ids: str | None, cases: Sequence[FixtureCase] = SEED_CASES) -> list[FixtureCase]:
+    """The cases named in a comma-separated ``ids`` list, in the given order (all of
+    ``cases`` when ``ids`` is ``None``). Story 4.4: a subset for a second model (the
+    26B set in ``fixtures/26b/``). An unknown id raises ``ValueError``."""
+    if ids is None:
+        return list(cases)
+    by_id = {c.id: c for c in cases}
+    wanted = [i.strip() for i in ids.split(",") if i.strip()]
+    unknown = [i for i in wanted if i not in by_id]
+    if unknown or not wanted:
+        raise ValueError(f"unknown fixture case id(s): {unknown or ids!r}")
+    return [by_id[i] for i in wanted]
+
+
 def load_fixtures(directory: str | Path) -> list[dict[str, Any]]:
     """Every ``*.json`` fixture in ``directory``, sorted by file name."""
     paths = sorted(Path(directory).glob("*.json"))
@@ -722,6 +736,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     g = sub.add_parser("generate", help="write the seed fixtures from MLXRunner (story 4.1)")
     g.add_argument("out_dir", type=Path)
     g.add_argument("--model", default=DEFAULT_MODEL)
+    g.add_argument(
+        "--cases", default=None, help="comma-separated case ids (default: every seed case)"
+    )
     g.set_defaults(func=_cmd_generate)
     c = sub.add_parser("check", help="compare a port's results with the fixtures (story 4.2)")
     c.add_argument("fixtures_dir", type=Path)
@@ -744,7 +761,12 @@ def _load_runner(repo: str, int8: bool = False) -> Any:
 
 
 def _cmd_generate(args: argparse.Namespace) -> int:
-    paths = generate(args.out_dir, _load_runner(args.model))
+    try:
+        cases = select_cases(args.cases)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    paths = generate(args.out_dir, _load_runner(args.model), cases)
     print(f"wrote {len(paths)} fixtures to {args.out_dir}")
     return 0
 
