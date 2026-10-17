@@ -3,7 +3,7 @@ type: reference
 status: active
 title: Golden fixture format and the port results shape
 owner: maddie
-updated: 2026-10-16
+updated: 2026-10-17
 ---
 
 # Golden fixture format
@@ -39,6 +39,7 @@ One JSON object per file, named `<id>.json`:
 | `readout` | `"first-token"` or `"sequence"` (`request.options.readout`, default first-token). |
 | `label_style` | `"letters"` (the normal compile) or `"option-text"`: the case runs with the wire option `options.label_style: "option-text"` (story [1.8](../stories/1-8-option-text-labels-wire-option.md); see the error case). |
 | `prefix_cached` | First-token only: `true` means the system turn was KV-cached and the prompt prefilled from it. |
+| `gate` | Optional; absent means `"full"`. `"answer-and-ids"`: every exact comparison below still applies (ids, images, answer, error type), but max \|dp\| and max \|dlogit\| are reported and never gated. For near-tied cases whose probabilities move by percents with one bf16 rounding step (story [4.3](../stories/4-3-per-fixture-gate-and-clear-winner-image-fixtures.md)). An unknown value fails the case. |
 | `question` | Name of the request's single question. |
 | `request` | The `/v1/systemone` wire request ([wire schema](wire-schema.md)), exactly one question. Image blocks carry their PNG inline as base64 (story [6.5](../stories/6-5-image-fixtures-and-battery.md)). |
 | `expected` | The result block below. |
@@ -59,6 +60,9 @@ One JSON object per file, named `<id>.json`:
 | `raw_probabilities` | {option: float}: softmax of `raw_logits` at T = 1 | max abs distance within `--prob-tol` (default 1e-3) |
 | `answer` | string: the option with the highest raw probability (first wins ties) | exact |
 | `error` | {type, message}: present instead of `raw_*`/`answer` when compiling must fail | `type` exact; `message` ignored |
+
+The `compared` column is the full gate; under `gate: "answer-and-ids"` the
+two distance rows are reported only.
 
 Every key present in `expected` must be present in the result; a result with
 an `error` the fixture does not expect fails. On a token mismatch the checker
@@ -84,7 +88,8 @@ A bare `{id: result}` object is accepted too. From Python, `check(fixtures_dir,
 results)` takes a path, the parsed object, or a callable `fixture -> result`
 (run the port in process), and returns a `CheckReport` (`.ok`, `.render()`,
 per-case `failures`, `token_ids_equal`, `max_prob_distance`,
-`max_logit_distance`).
+`max_logit_distance`, `gate`). A port's checker must honour each fixture's
+`gate` the same way.
 
 ## How a port computes a result
 
@@ -125,7 +130,7 @@ identical logits, but the cache boundary is recorded so a port can follow it.
 
 ## The seed set
 
-Thirteen cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`). Five
+Sixteen cases (`SEED_CASES` in `src/mlx_classifiers/fixtures.py`). Eight
 carry images (story [6.5](../stories/6-5-image-fixtures-and-battery.md)):
 a colour question on a blue square from a cached prefix, the gridworld's
 action question on frame `gw-s3-t00` (`battery/images/`) given only as an
@@ -133,7 +138,12 @@ image, and a sequence-mode Yes/No on the square. Two more repeat the gridworld
 case at the non-default soft-token budgets (`-vt140`: 120 soft tokens from a
 480 x 576 resize; `-vt70`: 63 from 336 x 432; story
 [6.7](../stories/6-7-vision-soft-token-budget.md)); the budget is in
-the request's `options.vision_soft_tokens` and in `expected.images`. A port
+the request's `options.vision_soft_tokens` and in `expected.images`. The three
+gridworld action cases are near-tied and carry `gate: "answer-and-ids"`; three
+more ask "What colour is the square that represents you?" of the same frame
+at 280 / 140 / 70 (`choice-first-token-image-gridworld-you{,-vt140,-vt70}`,
+`blue` by 6.1 to 6.5 raw logits) and are gated in full (story
+[4.3](../stories/4-3-per-fixture-gate-and-clear-winner-image-fixtures.md)). A port
 resizes to the budget (at most budget x 9 patches of 16 px, sides multiples of
 48) and pools 3 x 3, exactly as at 280. The other eight: noul, choice
 and score in both readout modes; a prefix-cached case; states as a string, a

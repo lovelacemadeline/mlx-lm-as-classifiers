@@ -14,6 +14,7 @@
   "readout": "first-token",
   "label_style": "letters",
   "prefix_cached": false,
+  "gate": "answer-and-ids",
   "question": "q",
   "request": {
     "state": [

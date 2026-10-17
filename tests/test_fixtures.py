@@ -13,6 +13,7 @@ from mlx_classifiers import FakeRunner
 from mlx_classifiers.cli import main as cli_main
 from mlx_classifiers.fixtures import (
     FIXTURE_FORMAT,
+    GATES,
     RESULTS_FORMAT,
     SEED_CASES,
     FixtureCase,
@@ -276,6 +277,9 @@ def test_image_fixtures_pin_the_sha256_of_their_png_bytes():
         "choice-first-token-image-gridworld",
         "choice-first-token-image-gridworld-vt140",
         "choice-first-token-image-gridworld-vt70",
+        "choice-first-token-image-gridworld-you",
+        "choice-first-token-image-gridworld-you-vt140",
+        "choice-first-token-image-gridworld-you-vt70",
         "noul-sequence-image",
     }
     for fx in fxs:
@@ -313,3 +317,81 @@ def test_fake_runner_image_cases_run_both_readouts():
     for case in (c for c in SEED_CASES if "image" in c.id):
         out = run_case(case, FakeRunner())
         assert out["images"] and out["answer"] in out["options"]
+
+
+# --- 4.3: per-fixture gate ------------------------------------------------------------------
+
+NEAR_TIED = {
+    "choice-first-token-image-gridworld",
+    "choice-first-token-image-gridworld-vt140",
+    "choice-first-token-image-gridworld-vt70",
+}
+CLEAR_WINNER = {
+    "choice-first-token-image-gridworld-you",
+    "choice-first-token-image-gridworld-you-vt140",
+    "choice-first-token-image-gridworld-you-vt70",
+}
+
+
+def test_gate_key_only_on_answer_and_ids_fixtures():
+    fxs = load_fixtures(COMMITTED)
+    assert {fx["id"] for fx in fxs if "gate" in fx} == NEAR_TIED
+    assert all(fx["gate"] == "answer-and-ids" for fx in fxs if "gate" in fx)
+    assert {c.id for c in SEED_CASES if c.gate != "full"} == NEAR_TIED
+    assert set(GATES) == {"full", "answer-and-ids"}
+    with pytest.raises(ValueError, match="unknown gate"):
+        FixtureCase("x", "x", {"state": "s", "questions": {"q": {"type": "noul"}}}, gate="loose")
+
+
+def test_clear_winner_image_fixtures_cover_every_budget_with_a_wide_margin():
+    fxs = {fx["id"]: fx for fx in load_fixtures(COMMITTED) if fx["id"] in CLEAR_WINNER}
+    budgets = set()
+    for fx in fxs.values():
+        assert "gate" not in fx  # full gate
+        lg = sorted(fx["expected"]["raw_logits"].values(), reverse=True)
+        assert lg[0] - lg[1] >= 6.0  # story 4.3: a bf16 step on the runner-up moves p < 1e-3
+        budgets.add(fx["expected"]["images"][0].get("max_soft_tokens", 280))
+    assert budgets == {280, 140, 70}
+
+
+def test_answer_and_ids_reports_dp_without_gating_it(fake_dir):
+    res = _results(fake_dir)
+    near = "choice-first-token-image-gridworld"
+    probs = res["cases"][near]["raw_probabilities"]
+    top = res["cases"][near]["answer"]
+    other = next(o for o in probs if o != top)
+    probs[other] += 0.05  # far beyond 1e-3, answer unchanged
+    res["cases"][near]["raw_logits"][other] += 0.4
+    fxs = load_fixtures(fake_dir)
+    for fx in fxs:
+        if fx["id"] == near:
+            assert fx["gate"] == "answer-and-ids"
+    report = check(fxs, res, logit_tol=0.1)
+    assert report.ok
+    case = next(c for c in report.cases if c.id == near)
+    assert case.gate == "answer-and-ids" and case.max_prob_distance == pytest.approx(0.05)
+    assert "not gated" in case.render()
+    # the same distance on a full-gate fixture fails
+    for fx in fxs:
+        fx.pop("gate", None)
+    assert not check(fxs, res).ok
+
+
+def test_answer_and_ids_still_gates_ids_images_and_answer(fake_dir):
+    near = "choice-first-token-image-gridworld"
+    for mutate, prefix in (
+        (lambda r: r["tokens"].__setitem__(3, r["tokens"][3] + 1), "tokens[3]"),
+        (lambda r: r["images"][0].__setitem__("sha256", "0" * 64), "images:"),
+        (lambda r: r.__setitem__("answer", "wait" if r["answer"] != "wait" else "north"), "answer:"),
+    ):
+        res = _results(fake_dir)
+        mutate(res["cases"][near])
+        (bad,) = [c for c in check(fake_dir, res).cases if not c.ok]
+        assert bad.id == near and any(f.startswith(prefix) for f in bad.failures)
+
+
+def test_unknown_gate_in_a_fixture_fails_the_case(fake_dir):
+    fxs = load_fixtures(fake_dir)
+    fxs[0]["gate"] = "loose"
+    (bad,) = [c for c in check(fxs, _results(fake_dir)).cases if not c.ok]
+    assert bad.failures == ["gate: unknown gate 'loose', expected one of ['full', 'answer-and-ids']"]

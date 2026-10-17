@@ -3,7 +3,7 @@ type: story
 status: completed
 title: Image fixtures and a battery slice with images
 owner: maddie
-updated: 2026-10-16
+updated: 2026-10-17
 anchor:
   - symbol: "src/mlx_classifiers/fixtures.py::SEED_CASES"
   - symbol: "src/mlx_classifiers/fixtures.py::run_case"
@@ -42,6 +42,15 @@ eleven left the eight existing files byte-identical (no diff); two MLXRunner
 generations are byte-identical (existing test, now covering the image cases).
 The fixture-format reference documents the field and how a port compiles and
 prefills an image.
+
+**Gate (story [4.3](4-3-per-fixture-gate-and-clear-winner-image-fixtures.md)).**
+The gridworld case (and its 6.7 budget variants) is near-tied across six
+actions, so one bf16 rounding step moves its probabilities by percents: this
+repo on MLX 0.32.2 instead of 0.32.0 gives max |dp| 0.0757 (280) and 0.021
+(140), and the Swift port on 0.32.2 fails the same way. The three files now
+carry `gate: "answer-and-ids"` (exact ids, images and answer; |dp| reported,
+not gated), and three clear-winner questions on the same frame carry the
+probability gate at every budget.
 
 **INT8 on image fixtures.** The colour and sequence image cases agree with
 stock within the INT8 gates (max |dp| 7e-4 and 0). The gridworld frame, a

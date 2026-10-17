@@ -1,0 +1,88 @@
+{
+  "format": "mlx-classifiers-fixture/1",
+  "id": "choice-first-token-image-gridworld-you",
+  "description": "4-way 'what colour are you' on the gridworld frame (clear winner; story 4.3)",
+  "model": {
+    "repo": "mlx-community/gemma-4-E2B-it-qat-4bit",
+    "revision": "42f62737af7a9fd8c1d55d79666c1a217be4e2e2",
+    "tokenizer_sha256": "cc8d3a0ce36466ccc1278bf987df5f71db1719b9ca6b4118264f45cb627bfe0f"
+  },
+  "path": {
+    "prefill": "split",
+    "prefill_step": 2048
+  },
+  "readout": "first-token",
+  "label_style": "letters",
+  "prefix_cached": false,
+  "question": "q",
+  "request": {
+    "state": [
+      "The picture is the map, north up: you are the blue square, the goal is the green cell, monsters are red cells (white pips are their hp), walls are dark grey and floor is light. The dark strip under the map shows your hp, the tick and your last action.",
+      {
+        "type": "image/png",
+        "base64": "iVBORw0KGgoAAAANSUhEUgAAAKAAAADACAIAAAAMWf8gAAACxElEQVR4nO3dsWpTYRiA4UR6CY4ZOjqkUKg4d3JyEofiZYj0Ijp4GdJBvAAnZ1EQkkGcRbwKcXOwGTxiSM77P8904BzIKS8fJfl60uXl5ZPFFLevX026nsO6d+DXZ88EjhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM47mQxmKvnLxZzNnUfb4LjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOO5k7s/7Tt3v3h7Zz7vv/bQJjhM4TuA4geMEjhM4TuA4geMEjhM4TuA4geMEjhM4TuC44Z4PHm0/bYLjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOG72++Cp+9Rvj59Ouv7l/dPFnPfNJjhu0MAXm83FZnP3uGfQwOOY/e/gf/Pp7GzncY8JjhM4TuA4geMEjhM4TuA4geMEjhM4TuC45Y/vXxdzNnW/u3r3dtbP+05lguMigcfZ7w4amPg+eJz97lQmOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHj9r4PfvbhetL1bx7d7O1eRmSC4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhO4DiB4wSOEzhu9s8HH9vzu1dHdj8mOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjBI4TOE7gOIHjZr8Pnvu+dt9McJzAcQLHCRwncJzAcQLHCRwncJzAcQLHCRwncJzAcQLHDbcPHo0JjhM4TuC4yP8PHtPl9e75fH/z8/exCY4TOE7gOIHjBI4TOE7gOJ9Fx5ngOIHjBI5brlanh74H9sgEj7FN+rh+sPP0w+2Xoz3L3zDBcQLHCRwncJzAcQLHCRznk6w4ExwncJzAcQLHCRwncJzAY+yDt9vPf5xYr88PcT/8ZyZ4pMDr9bnBjTHBcQLHCRwncJzAI33Lzt13w8ydCY7zFx1xJjhO4DiBF22/ABGiZzunTXNxAAAAAElFTkSuQmCC"
+      }
+    ],
+    "questions": {
+      "q": {
+        "type": "choice",
+        "instructions": "What colour is the square that represents you?",
+        "criteria": {
+          "red": null,
+          "green": null,
+          "blue": null,
+          "yellow": null
+        }
+      }
+    },
+    "prefix": "You are playing a turn-based grid game. Each turn you see the map and a status line, and you choose exactly one action. Reach the goal G without dying; monsters M that are next to you hit you every turn."
+  },
+  "expected": {
+    "tokens": [2, 105, 9731, 107, 3048, 659, 5662, 496, 2490, 236772, 5140, 8411, 2290, 236761, 7714, 2490, 611, 1460, 506, 4187, 532, 496, 4981, 1757, 236764, 532, 611, 5347, 7121, 886, 2970, 236761, 76217, 506, 5671, 667, 2180, 26328, 236793, 47525, 587, 600, 659, 2148, 531, 611, 5524, 611, 1418, 2490, 236761, 106, 107, 105, 2364, 107, 3112, 236787, 107, 236840, 236770, 236842, 669, 6083, 563, 506, 4187, 236764, 8339, 872, 236787, 611, 659, 506, 3730, 6281, 236764, 506, 5671, 563, 506, 3826, 2145, 236764, 47525, 659, 2604, 3874, 568, 7986, 510, 3290, 659, 910, 30440, 779, 11595, 659, 4996, 13501, 532, 6413, 563, 2214, 236761, 669, 4996, 13356, 1208, 506, 4187, 3831, 822, 30440, 236764, 506, 7202, 532, 822, 1774, 2970, 236761, 108, 236840, 236778, 236842, 236743, 255999, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258880, 258882, 108, 14977, 236787, 2900, 10348, 563, 506, 6281, 600, 9282, 611, 236881, 108, 8755, 236787, 107, 236776, 236761, 2604, 107, 236799, 236761, 3826, 107, 236780, 236761, 3730, 107, 236796, 236761, 7070, 108, 7925, 607, 506, 6064, 529, 886, 5086, 1186, 236761, 106, 107, 105, 4368, 107],
+    "prefix_len": 53,
+    "readout_position": 444,
+    "options": [
+      "red",
+      "green",
+      "blue",
+      "yellow"
+    ],
+    "labels": [
+      "A",
+      "B",
+      "C",
+      "D"
+    ],
+    "images": [
+      {
+        "start": 128,
+        "length": 270,
+        "sha256": "9e34f3a858739053635b0fc0355316f707130966d16833eba6652e6a99ac3e6d"
+      }
+    ],
+    "option_token_ids": {
+      "red": [236776],
+      "green": [236799],
+      "blue": [236780],
+      "yellow": [236796]
+    },
+    "raw_logits": {
+      "red": 19.125,
+      "green": 19.5,
+      "blue": 26.375,
+      "yellow": 19.875
+    },
+    "raw_probabilities": {
+      "red": 0.0007078759783856291,
+      "green": 0.0010299534711655498,
+      "blue": 0.9967635970924467,
+      "yellow": 0.00149857345800209
+    },
+    "answer": "blue"
+  },
+  "generator": {
+    "mlx-classifiers": "0.0.1",
+    "mlx": "0.32.0",
+    "mlx-lm": "0.31.3"
+  }
+}

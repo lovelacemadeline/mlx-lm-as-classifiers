@@ -3,7 +3,7 @@ type: story
 status: completed
 title: Vision soft-token budget — 70 / 140 / 280 per request, gated on the battery and the loop
 owner: maddie
-updated: 2026-10-16
+updated: 2026-10-17
 anchor:
   - symbol: "src/mlx_classifiers/images.py::SOFT_TOKEN_BUDGETS"
   - symbol: "src/mlx_classifiers/images.py::image_key_id"
@@ -77,6 +77,10 @@ difference in soft tokens (150 fewer at 140).
   the request and in `expected.images[].max_soft_tokens`. `describe()` omits
   the key at 280, so the default fixtures keep their exact images record.
   `fixtures check --runner mlx --logit-tol 0`: 13/13, max |dlogit| 0.
+  Since story [4.3](4-3-per-fixture-gate-and-clear-winner-image-fixtures.md)
+  these two are answer-and-ids checks (near-tied), and
+  `choice-first-token-image-gridworld-you-vt140` / `-vt70` carry the
+  budget path under the full gate.
 
 ## Measured (M5, AC, low power mode off before and after every run; mlx 0.32.0)
 

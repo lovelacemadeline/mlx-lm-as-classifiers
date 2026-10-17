@@ -44,6 +44,7 @@ from .sequence import score_sequences
 
 __all__ = [
     "FIXTURE_FORMAT",
+    "GATES",
     "RESULTS_FORMAT",
     "SEED_CASES",
     "CaseReport",
@@ -61,6 +62,11 @@ __all__ = [
 FIXTURE_FORMAT = "mlx-classifiers-fixture/1"
 RESULTS_FORMAT = "mlx-classifiers-results/1"
 DEFAULT_PROB_TOL = 1e-3
+# Per-fixture gate (story 4.3). "full": token ids, images, answer exact and raw
+# probabilities within --prob-tol. "answer-and-ids": the same exact checks, with
+# max|dp| (and max|dlogit|) reported but never gated -- for near-tied cases where one
+# bf16 rounding step moves probabilities by several percent. Absent means "full".
+GATES = ("full", "answer-and-ids")
 
 Result = dict[str, Any]
 
@@ -78,6 +84,10 @@ class FixtureCase:
     (story 1.8): the option names are the labels, read out first-token, which must
     fail when a name is more than one token. A request that sets
     ``options.label_style`` itself must agree with ``label_style``.
+
+    ``gate`` (story 4.3) is how a port's result is judged: ``"full"`` (the
+    default; the fixture file omits the key) or ``"answer-and-ids"`` (see
+    :data:`GATES`).
     """
 
     id: str
@@ -85,6 +95,7 @@ class FixtureCase:
     request: dict[str, Any]
     prefix_cached: bool = False
     label_style: str = "letters"
+    gate: str = "full"
 
     def __post_init__(self) -> None:
         if len(self.request.get("questions", {})) != 1:
@@ -93,6 +104,8 @@ class FixtureCase:
             raise ValueError(f"case {self.id}: prefix_cached needs a request prefix")
         if self.label_style not in ("letters", "option-text"):
             raise ValueError(f"case {self.id}: unknown label_style {self.label_style!r}")
+        if self.gate not in GATES:
+            raise ValueError(f"case {self.id}: unknown gate {self.gate!r}")
         wire = self.request.get("options", {}).get("label_style", self.label_style)
         if wire != self.label_style:
             raise ValueError(
@@ -177,6 +190,14 @@ _GRID_STATE = [
     "The picture is the map, north up: you are the blue square, the goal is the green cell, monsters are red cells (white pips are their hp), walls are dark grey and floor is light. The dark strip under the map shows your hp, the tick and your last action.",
     {"type": "image/png", "base64": _GRIDWORLD_FRAME},
 ]
+# Story 4.3: a question about the same frame with a clear winner (blue by >= 6 raw logits
+# at every budget), the full-gate replacement for the near-tied six-action cases. A gap
+# of about 4 was not enough: one bf16 step on a logit at p 0.99 is ~1.7e-3 (story 4.3).
+_GRID_YOU = {
+    "type": "choice",
+    "instructions": "What colour is the square that represents you?",
+    "criteria": {"red": None, "green": None, "blue": None, "yellow": None},
+}
 _GRID_ACTION = {
     "type": "choice",
     "instructions": "Which action next?",
@@ -249,6 +270,7 @@ SEED_CASES: tuple[FixtureCase, ...] = (
         "choice-first-token-image-gridworld",
         "the gridworld's 6-action question on a frame given only as an image (story 6.5)",
         _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX),
+        gate="answer-and-ids",
     ),
     FixtureCase(
         "noul-sequence-image",
@@ -262,11 +284,31 @@ SEED_CASES: tuple[FixtureCase, ...] = (
         "the gridworld frame case at a 140 soft-token budget (120 tokens; story 6.7)",
         _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX)
         | {"options": {"vision_soft_tokens": 140}},
+        gate="answer-and-ids",
     ),
     FixtureCase(
         "choice-first-token-image-gridworld-vt70",
         "the gridworld frame case at a 70 soft-token budget (63 tokens; story 6.7)",
         _req(_GRID_ACTION, _GRID_STATE, prefix=_GRID_PREFIX)
+        | {"options": {"vision_soft_tokens": 70}},
+        gate="answer-and-ids",
+    ),
+    # Story 4.3: the same frame and budgets with a clear-winner question, gated in full.
+    FixtureCase(
+        "choice-first-token-image-gridworld-you",
+        "4-way 'what colour are you' on the gridworld frame (clear winner; story 4.3)",
+        _req(_GRID_YOU, _GRID_STATE, prefix=_GRID_PREFIX),
+    ),
+    FixtureCase(
+        "choice-first-token-image-gridworld-you-vt140",
+        "the 'what colour are you' gridworld case at a 140 soft-token budget (story 4.3)",
+        _req(_GRID_YOU, _GRID_STATE, prefix=_GRID_PREFIX)
+        | {"options": {"vision_soft_tokens": 140}},
+    ),
+    FixtureCase(
+        "choice-first-token-image-gridworld-you-vt70",
+        "the 'what colour are you' gridworld case at a 70 soft-token budget (story 4.3)",
+        _req(_GRID_YOU, _GRID_STATE, prefix=_GRID_PREFIX)
         | {"options": {"vision_soft_tokens": 70}},
     ),
 )
@@ -391,7 +433,7 @@ def build_fixture(
     """The full fixture dict for ``case``: provenance, path, request, expected."""
     req = SystemOneRequest.model_validate(case.request)
     model_id = getattr(runner, "model_id", "unknown")
-    return {
+    fx: dict[str, Any] = {
         "format": FIXTURE_FORMAT,
         "id": case.id,
         "description": case.description,
@@ -400,11 +442,16 @@ def build_fixture(
         "readout": req.effective_options.readout,
         "label_style": case.label_style,
         "prefix_cached": case.prefix_cached,
+    }
+    if case.gate != "full":  # story 4.3; absent = full, so full-gate files are unchanged
+        fx["gate"] = case.gate
+    fx |= {
         "question": next(iter(req.questions)),
         "request": case.request,
         "expected": run_case(case, runner),
         "generator": _versions(),
     }
+    return fx
 
 
 # Only arrays json.dumps broke over lines: a JSON string never holds a raw newline.
@@ -469,6 +516,7 @@ class CaseReport:
     token_ids_equal: bool = True
     max_prob_distance: float | None = None
     max_logit_distance: float | None = None
+    gate: str = "full"
 
     @property
     def ok(self) -> bool:
@@ -479,13 +527,18 @@ class CaseReport:
         dl = "-" if self.max_logit_distance is None else f"{self.max_logit_distance:.3g}"
         tok = "exact" if self.token_ids_equal else "MISMATCH"
         head = f"{'PASS' if self.ok else 'FAIL'}  {self.id}  token ids {tok}  max|dp| {dp}"
-        lines = [f"{head}  max|dlogit| {dl}"]
+        tail = "  (gate answer-and-ids: dp, dlogit not gated)" if self.gate != "full" else ""
+        lines = [f"{head}  max|dlogit| {dl}{tail}"]
         lines += [f"      - {f}" for f in self.failures]
         return "\n".join(lines)
 
 
 @dataclass
 class CheckReport:
+    """Every case's :class:`CaseReport`; ``ok`` when all pass under their own gate
+    (a fixture's ``gate``, story 4.3: ``"answer-and-ids"`` cases report max|dp| and
+    max|dlogit| without gating them)."""
+
     cases: list[CaseReport]
 
     @property
@@ -532,6 +585,7 @@ def compare(
     case_id: str = "?",
     prob_tol: float = DEFAULT_PROB_TOL,
     logit_tol: float | None = None,
+    gate: str = "full",
 ) -> CaseReport:
     """Compare one result block against a fixture's ``expected`` block.
 
@@ -540,9 +594,15 @@ def compare(
     sha256), ``answer``, ``error.type``. Within
     ``prob_tol`` (max absolute difference): ``raw_probabilities``. ``raw_logits``
     distance is reported, and fails only when ``logit_tol`` is given.
+
+    ``gate`` is the fixture's (story 4.3). ``"answer-and-ids"`` keeps every exact
+    check and reports both distances but gates neither.
     """
-    rep = CaseReport(case_id)
+    rep = CaseReport(case_id, gate=gate)
     f = rep.failures
+    if gate not in GATES:
+        f.append(f"gate: unknown gate {gate!r}, expected one of {list(GATES)}")
+    gated = gate == "full"
     if result is None:
         f.append("no result for this case")
         rep.token_ids_equal = False
@@ -593,12 +653,12 @@ def compare(
         want, got = expected["raw_probabilities"], result["raw_probabilities"]
         d, o = _max_distance("raw_probabilities", want, got, f)
         rep.max_prob_distance = d
-        if d is not None and not d <= prob_tol:
+        if gated and d is not None and not d <= prob_tol:
             f.append(f"raw_probabilities: max distance {d:.3g} at {o!r} exceeds {prob_tol:g}")
     if "raw_logits" in result:
         d, o = _max_distance("raw_logits", expected["raw_logits"], result["raw_logits"], f)
         rep.max_logit_distance = d
-        if d is not None and logit_tol is not None and not d <= logit_tol:
+        if gated and d is not None and logit_tol is not None and not d <= logit_tol:
             f.append(f"raw_logits: max distance {d:.3g} at {o!r} exceeds {logit_tol:g}")
     if "answer" in result and result["answer"] != expected["answer"]:
         f.append(f"answer: expected {expected['answer']!r}, got {result['answer']!r}")
@@ -633,6 +693,7 @@ def check(
     a results JSON path, its parsed object (``{"format", "cases": {id: result}}``
     or a bare ``{id: result}``), or a callable ``fixture -> result`` (run the
     port in process). A result has the shape of the fixture's ``expected`` block.
+    Each case is judged under its fixture's ``gate`` (absent = ``"full"``).
     """
     fxs = load_fixtures(fixtures) if isinstance(fixtures, str | Path) else list(fixtures)
     lookup = _results_lookup(results)
@@ -645,6 +706,7 @@ def check(
                 case_id=fx["id"],
                 prob_tol=prob_tol,
                 logit_tol=logit_tol,
+                gate=fx.get("gate", "full"),
             )
         )
     return CheckReport(reports)
